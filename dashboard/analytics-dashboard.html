@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Özel Ders Piyasası Analiz Merkezi</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 240px;
+            height: 100vh;
+            background: #12121a;
+            border-right: 1px solid #2a2a3a;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+        .sidebar h1 {
+            font-size: 18px;
+            padding: 0 20px 20px;
+            border-bottom: 1px solid #2a2a3a;
+            margin-bottom: 20px;
+        }
+        .nav-section {
+            margin-bottom: 20px;
+        }
+        .nav-section h3 {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #666;
+            padding: 0 20px 10px;
+            letter-spacing: 1px;
+        }
+        .nav-item {
+            padding: 10px 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .nav-item:hover { background: #1a1a2a; }
+        .nav-item.active {
+            background: #1a1a2a;
+            border-left-color: #4ade80;
+            color: #4ade80;
+        }
+        .nav-item .count {
+            margin-left: auto;
+            background: #2a2a3a;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+        }
+
+        /* Main Content */
+        .main {
+            margin-left: 240px;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* Header */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        .page-header h2 {
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .breadcrumb {
+            color: #666;
+            font-size: 14px;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #1a1a2a, #12121a);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #2a2a3a;
+        }
+        .stat-card.highlight {
+            background: linear-gradient(135deg, #1e3a5f, #0f172a);
+            border-color: #3b82f6;
+        }
+        .stat-card .label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+        }
+        .stat-card .value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .stat-card .change {
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        .stat-card .change.up { color: #4ade80; }
+        .stat-card .change.down { color: #f87171; }
+
+        /* Charts Grid */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .chart-container {
+            background: #12121a;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #2a2a3a;
+        }
+        .chart-container.full-width {
+            grid-column: span 2;
+        }
+        .chart-container h3 {
+            font-size: 14px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chart-wrapper {
+            height: 300px;
+            position: relative;
+        }
+        .chart-wrapper.tall { height: 400px; }
+
+        /* Table */
+        .data-table {
+            background: #12121a;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #2a2a3a;
+            margin-bottom: 20px;
+            overflow-x: auto;
+        }
+        .data-table h3 {
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #2a2a3a;
+        }
+        th {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #888;
+            font-weight: 600;
+        }
+        tr:hover { background: #1a1a2a; }
+        .price { color: #4ade80; font-weight: 600; }
+        .clickable { cursor: pointer; color: #60a5fa; }
+        .clickable:hover { text-decoration: underline; }
+
+        /* Comparison Cards */
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .comparison-card {
+            background: #12121a;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #2a2a3a;
+        }
+        .comparison-card h4 {
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        .comparison-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #1a1a2a;
+        }
+        .comparison-item:last-child { border-bottom: none; }
+        .bar-wrapper {
+            flex: 1;
+            margin: 0 15px;
+            height: 8px;
+            background: #2a2a3a;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .bar {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            border-radius: 4px;
+        }
+
+        /* Filters */
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .filter-group label {
+            display: block;
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 5px;
+        }
+        select, input {
+            background: #1a1a2a;
+            border: 1px solid #2a2a3a;
+            color: #e0e0e0;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        select:focus, input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        /* Config Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            background: #12121a;
+            border-radius: 12px;
+            padding: 30px;
+            width: 400px;
+            border: 1px solid #2a2a3a;
+        }
+        .modal-content h3 {
+            margin-bottom: 20px;
+        }
+        .modal-content input {
+            width: 100%;
+            margin-bottom: 15px;
+        }
+        .modal-content button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+        }
+        .modal-content button:hover {
+            background: #2563eb;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+        }
+        .spinner {
+            border: 3px solid #2a2a3a;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .charts-grid { grid-template-columns: 1fr; }
+            .chart-container.full-width { grid-column: span 1; }
+        }
+        @media (max-width: 768px) {
+            .sidebar { width: 60px; }
+            .sidebar h1, .sidebar h3, .nav-item span { display: none; }
+            .main { margin-left: 60px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar">
+        <h1>📊 Analiz Merkezi</h1>
+
+        <div class="nav-section">
+            <h3>Genel</h3>
+            <div class="nav-item active" data-page="overview">
+                <span>🏠</span> <span>Genel Bakış</span>
+            </div>
+            <div class="nav-item" data-page="comparison">
+                <span>⚖️</span> <span>Karşılaştırmalar</span>
+            </div>
+        </div>
+
+        <div class="nav-section">
+            <h3>Şehirler</h3>
+            <div id="city-nav"></div>
+        </div>
+
+        <div class="nav-section">
+            <h3>Dersler</h3>
+            <div id="subject-nav"></div>
+        </div>
+
+        <div class="nav-section">
+            <h3>Ayarlar</h3>
+            <div class="nav-item" onclick="showConfig()">
+                <span>⚙️</span> <span>Bağlantı</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main">
+        <!-- Overview Page -->
+        <div id="page-overview" class="page active">
+            <div class="page-header">
+                <h2>📊 Genel Bakış</h2>
+                <span class="breadcrumb">Tüm Veriler</span>
+            </div>
+
+            <div class="stats-grid" id="overview-stats"></div>
+
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <h3>📚 Ders Dağılımı</h3>
+                    <div class="chart-wrapper"><canvas id="chart-subjects"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <h3>💰 Ders Bazlı Ortalama Fiyatlar</h3>
+                    <div class="chart-wrapper"><canvas id="chart-subject-prices"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <h3>🏙️ Şehir Dağılımı</h3>
+                    <div class="chart-wrapper"><canvas id="chart-cities"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <h3>💵 Şehir Bazlı Ortalama Fiyatlar</h3>
+                    <div class="chart-wrapper"><canvas id="chart-city-prices"></canvas></div>
+                </div>
+                <div class="chart-container full-width">
+                    <h3>📈 Fiyat Aralıkları Dağılımı</h3>
+                    <div class="chart-wrapper"><canvas id="chart-price-ranges"></canvas></div>
+                </div>
+            </div>
+
+            <div class="data-table">
+                <h3>📋 Tüm Kayıtlar</h3>
+                <table id="table-all"></table>
+            </div>
+        </div>
+
+        <!-- Comparison Page -->
+        <div id="page-comparison" class="page">
+            <div class="page-header">
+                <h2>⚖️ Karşılaştırmalar</h2>
+                <span class="breadcrumb">Şehir ve Ders Karşılaştırmaları</span>
+            </div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Karşılaştırma Türü</label>
+                    <select id="comparison-type" onchange="updateComparison()">
+                        <option value="city-by-subject">Şehirleri Derse Göre Karşılaştır</option>
+                        <option value="subject-by-city">Dersleri Şehire Göre Karşılaştır</option>
+                    </select>
+                </div>
+                <div class="filter-group" id="filter-subject-group">
+                    <label>Ders Seçin</label>
+                    <select id="filter-subject" onchange="updateComparison()"></select>
+                </div>
+                <div class="filter-group" id="filter-city-group" style="display:none">
+                    <label>Şehir Seçin</label>
+                    <select id="filter-city" onchange="updateComparison()"></select>
+                </div>
+            </div>
+
+            <div class="charts-grid">
+                <div class="chart-container full-width">
+                    <h3 id="comparison-chart-title">📊 Karşılaştırma</h3>
+                    <div class="chart-wrapper tall"><canvas id="chart-comparison"></canvas></div>
+                </div>
+            </div>
+
+            <div class="comparison-grid" id="comparison-details"></div>
+        </div>
+
+        <!-- City Detail Page -->
+        <div id="page-city" class="page">
+            <div class="page-header">
+                <h2 id="city-page-title">🏙️ Şehir Detayı</h2>
+                <span class="breadcrumb" id="city-breadcrumb">Şehir</span>
+            </div>
+
+            <div class="stats-grid" id="city-stats"></div>
+
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <h3>📚 Bu Şehirdeki Dersler</h3>
+                    <div class="chart-wrapper"><canvas id="chart-city-subjects"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <h3>💰 Ders Fiyatları</h3>
+                    <div class="chart-wrapper"><canvas id="chart-city-subject-prices"></canvas></div>
+                </div>
+                <div class="chart-container full-width">
+                    <h3>📈 Fiyat Aralıkları</h3>
+                    <div class="chart-wrapper"><canvas id="chart-city-price-ranges"></canvas></div>
+                </div>
+            </div>
+
+            <div class="data-table">
+                <h3 id="city-table-title">📋 Kayıtlar</h3>
+                <table id="table-city"></table>
+            </div>
+        </div>
+
+        <!-- Subject Detail Page -->
+        <div id="page-subject" class="page">
+            <div class="page-header">
+                <h2 id="subject-page-title">📚 Ders Detayı</h2>
+                <span class="breadcrumb" id="subject-breadcrumb">Ders</span>
+            </div>
+
+            <div class="stats-grid" id="subject-stats"></div>
+
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <h3>🏙️ Bu Dersin Şehirlere Göre Dağılımı</h3>
+                    <div class="chart-wrapper"><canvas id="chart-subject-cities"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <h3>💰 Şehirlere Göre Fiyatlar</h3>
+                    <div class="chart-wrapper"><canvas id="chart-subject-city-prices"></canvas></div>
+                </div>
+                <div class="chart-container full-width">
+                    <h3>📈 Fiyat Aralıkları</h3>
+                    <div class="chart-wrapper"><canvas id="chart-subject-price-ranges"></canvas></div>
+                </div>
+            </div>
+
+            <div class="data-table">
+                <h3 id="subject-table-title">📋 Kayıtlar</h3>
+                <table id="table-subject"></table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Config Modal -->
+    <div class="modal" id="config-modal">
+        <div class="modal-content">
+            <h3>⚙️ Supabase Bağlantısı</h3>
+            <input type="text" id="config-url" placeholder="Supabase URL">
+            <input type="text" id="config-key" placeholder="Anon Key">
+            <button onclick="saveConfig()">Kaydet ve Bağlan</button>
+        </div>
+    </div>
+
+    <script>
+        // Global State
+        let allData = [];
+        let charts = {};
+        let supabaseUrl = localStorage.getItem('supabase_url') || '';
+        let supabaseKey = localStorage.getItem('supabase_key') || '';
+
+        // Colors
+        const colors = [
+            '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+            '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1',
+            '#14b8a6', '#a855f7', '#eab308', '#22c55e', '#0ea5e9'
+        ];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!supabaseUrl || !supabaseKey) {
+                showConfig();
+            } else {
+                loadAllData();
+            }
+            setupNavigation();
+        });
+
+        function showConfig() {
+            document.getElementById('config-url').value = supabaseUrl;
+            document.getElementById('config-key').value = supabaseKey;
+            document.getElementById('config-modal').classList.add('active');
+        }
+
+        function saveConfig() {
+            supabaseUrl = document.getElementById('config-url').value.trim();
+            supabaseKey = document.getElementById('config-key').value.trim();
+            localStorage.setItem('supabase_url', supabaseUrl);
+            localStorage.setItem('supabase_key', supabaseKey);
+            document.getElementById('config-modal').classList.remove('active');
+            loadAllData();
+        }
+
+        function setupNavigation() {
+            document.querySelectorAll('.nav-item[data-page]').forEach(item => {
+                item.addEventListener('click', () => {
+                    const page = item.dataset.page;
+                    showPage(page);
+                });
+            });
+        }
+
+        function showPage(pageId, param = null) {
+            // Update nav
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            const navItem = document.querySelector(`.nav-item[data-page="${pageId}"]`);
+            if (navItem) navItem.classList.add('active');
+
+            // Show page
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(`page-${pageId}`).classList.add('active');
+
+            // Load page data
+            if (pageId === 'overview') renderOverview();
+            else if (pageId === 'comparison') renderComparison();
+            else if (pageId === 'city' && param) renderCityDetail(param);
+            else if (pageId === 'subject' && param) renderSubjectDetail(param);
+        }
+
+        async function loadAllData() {
+            try {
+                // Fetch ALL data (no limit)
+                let allRecords = [];
+                let offset = 0;
+                const batchSize = 1000;
+
+                while (true) {
+                    const response = await fetch(
+                        `${supabaseUrl}/rest/v1/listings?select=*&order=created_at.desc&offset=${offset}&limit=${batchSize}`,
+                        { headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` } }
+                    );
+                    const data = await response.json();
+                    if (!data || data.length === 0) break;
+                    allRecords = allRecords.concat(data);
+                    offset += batchSize;
+                    if (data.length < batchSize) break;
+                }
+
+                allData = allRecords;
+                console.log(`Loaded ${allData.length} records`);
+
+                buildNavigation();
+                showPage('overview');
+            } catch (error) {
+                console.error('Data load error:', error);
+                alert('Veri yüklenemedi: ' + error.message);
+            }
+        }
+
+        function buildNavigation() {
+            // City navigation
+            const cities = [...new Set(allData.map(d => d.location_raw).filter(Boolean))].sort();
+            const cityNav = document.getElementById('city-nav');
+            cityNav.innerHTML = cities.map(city => {
+                const count = allData.filter(d => d.location_raw === city).length;
+                return `<div class="nav-item" data-page="city" data-param="${city}" onclick="showPage('city', '${city}')">
+                    <span>🏙️</span> <span>${city}</span> <span class="count">${count}</span>
+                </div>`;
+            }).join('');
+
+            // Subject navigation
+            const subjects = [...new Set(allData.map(d => d.category_raw).filter(Boolean))].sort();
+            const subjectNav = document.getElementById('subject-nav');
+            subjectNav.innerHTML = subjects.map(subject => {
+                const count = allData.filter(d => d.category_raw === subject).length;
+                return `<div class="nav-item" data-page="subject" data-param="${subject}" onclick="showPage('subject', '${subject}')">
+                    <span>📚</span> <span>${capitalize(subject)}</span> <span class="count">${count}</span>
+                </div>`;
+            }).join('');
+
+            // Populate filter dropdowns
+            const filterSubject = document.getElementById('filter-subject');
+            filterSubject.innerHTML = subjects.map(s => `<option value="${s}">${capitalize(s)}</option>`).join('');
+
+            const filterCity = document.getElementById('filter-city');
+            filterCity.innerHTML = cities.map(c => `<option value="${c}">${c}</option>`).join('');
+        }
+
+        function renderOverview() {
+            const prices = allData.filter(d => d.price_per_hour).map(d => d.price_per_hour);
+            const avg = prices.length ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : 0;
+            const median = prices.length ? prices.sort((a,b) => a-b)[Math.floor(prices.length/2)] : 0;
+            const min = prices.length ? Math.min(...prices) : 0;
+            const max = prices.length ? Math.max(...prices) : 0;
+            const onlineCount = allData.filter(d => d.lesson_type === 'online' || d.lesson_type === 'both').length;
+
+            document.getElementById('overview-stats').innerHTML = `
+                <div class="stat-card highlight"><div class="label">Toplam Kayıt</div><div class="value">${allData.length}</div></div>
+                <div class="stat-card"><div class="label">Ortalama Ücret</div><div class="value">${avg}₺</div></div>
+                <div class="stat-card"><div class="label">Medyan Ücret</div><div class="value">${median}₺</div></div>
+                <div class="stat-card"><div class="label">Min Ücret</div><div class="value">${min}₺</div></div>
+                <div class="stat-card"><div class="label">Max Ücret</div><div class="value">${max}₺</div></div>
+                <div class="stat-card"><div class="label">Online Ders</div><div class="value">${onlineCount}</div></div>
+            `;
+
+            // Subject distribution
+            const subjectCounts = groupBy(allData, 'category_raw');
+            renderChart('chart-subjects', 'doughnut', Object.keys(subjectCounts).map(capitalize), Object.values(subjectCounts).map(a => a.length));
+
+            // Subject prices
+            const subjectPrices = {};
+            Object.keys(subjectCounts).forEach(s => {
+                const prices = subjectCounts[s].filter(d => d.price_per_hour).map(d => d.price_per_hour);
+                subjectPrices[s] = prices.length ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : 0;
+            });
+            renderBarChart('chart-subject-prices', Object.keys(subjectPrices).map(capitalize), Object.values(subjectPrices), '₺');
+
+            // City distribution
+            const cityCounts = groupBy(allData, 'location_raw');
+            renderChart('chart-cities', 'doughnut', Object.keys(cityCounts), Object.values(cityCounts).map(a => a.length));
+
+            // City prices
+            const cityPrices = {};
+            Object.keys(cityCounts).forEach(c => {
+                const prices = cityCounts[c].filter(d => d.price_per_hour).map(d => d.price_per_hour);
+                cityPrices[c] = prices.length ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : 0;
+            });
+            renderBarChart('chart-city-prices', Object.keys(cityPrices), Object.values(cityPrices), '₺');
+
+            // Price ranges
+            const ranges = {'0-300': 0, '300-500': 0, '500-800': 0, '800-1200': 0, '1200-2000': 0, '2000+': 0};
+            allData.forEach(d => {
+                const p = d.price_per_hour;
+                if (!p) return;
+                if (p < 300) ranges['0-300']++;
+                else if (p < 500) ranges['300-500']++;
+                else if (p < 800) ranges['500-800']++;
+                else if (p < 1200) ranges['800-1200']++;
+                else if (p < 2000) ranges['1200-2000']++;
+                else ranges['2000+']++;
+            });
+            renderBarChart('chart-price-ranges', Object.keys(ranges), Object.values(ranges));
+
+            // Full table
+            renderTable('table-all', allData);
+        }
+
+        function renderCityDetail(city) {
+            document.getElementById('city-page-title').textContent = `🏙️ ${city}`;
+            document.getElementById('city-breadcrumb').textContent = `Şehirler > ${city}`;
+            document.getElementById('city-table-title').textContent = `📋 ${city} Kayıtları`;
+
+            // Highlight nav
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.querySelector(`.nav-item[data-param="${city}"]`)?.classList.add('active');
+
+            const cityData = allData.filter(d => d.location_raw === city);
+            const prices = cityData.filter(d => d.price_per_hour).map(d => d.price_per_hour);
+            const avg = prices.length ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : 0;
+            const median = prices.length ? prices.sort((a,b) => a-b)[Math.floor(prices.length/2)] : 0;
+            const min = prices.length ? Math.min(...prices) : 0;
+            const max = prices.length ? Math.max(...prices) : 0;
+
+            document.getElementById('city-stats').innerHTML = `
+                <div class="stat-card highlight"><div class="label">Toplam Kayıt</div><div class="value">${cityData.length}</div></div>
+                <div class="stat-card"><div class="label">Ortalama Ücret</div><div class="value">${avg}₺</div></div>
+                <div class="stat-card"><div class="label">Medyan Ücret</div><div class="value">${median}₺</div></div>
+                <div class="stat-card"><div class="label">Min Ücret</div><div class="value">${min}₺</div></div>
+                <div class="stat-card"><div class="label">Max Ücret</div><div class="value">${max}₺</div></div>
+            `;
+
+            // Subject distribution in city
+            const subjectCounts = groupBy(cityData, 'category_raw');
+            renderChart('chart-city-subjects', 'doughnut', Object.keys(subjectCounts).map(capitalize), Object.values(subjectCounts).map(a => a.length));
+
+            // Subject prices in city
+            const subjectPrices = {};
+            Object.keys(subjectCounts).forEach(s => {
+                const prices = subjectCounts[s].filter(d => d.price_per_hour).map(d => d.price_per_hour);
+                subjectPrices[s] = prices.length ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : 0;
+            });
+            renderBarChart('chart-city-subject-prices', Object.keys(subjectPrices).map(capitalize), Object.values(subjectPrices), '₺');
+
+            // Price ranges in city
+            const ranges = {'0-300': 0, '300-500': 0, '500-800': 0, '800-1200': 0, '1200-2000': 0, '2000+': 0};
+            cityData.forEach(d => {
+                const p = d.price_per_hour;
+                if (!p) return;
+                if (p < 300) ranges['0-300']++;
+                else if (p < 500) ranges['300-500']++;
+                else if (p < 800) ranges['500-800']++;
+                else if (p < 1200) ranges['800-1200']++;
+                else if (p < 2000) ranges['1200-2000']++;
+                else ranges['2000+']++;
+            });
+            renderBarChart('chart-city-price-ranges', Object.keys(ranges), Object.values(ranges));
+
+            // Table
+            renderTable('table-city', cityData);
+        }
+
+        function renderSubjectDetail(subject) {
+            document.getElementById('subject-page-title').textContent = `📚 ${capitalize(subject)}`;
+            document.getElementById('subject-breadcrumb').textContent = `Dersler > ${capitalize(subject)}`;
+            document.getElementById('subject-table-title').textContent = `📋 ${capitalize(subject)} Kayıtları`;
+
+            // Highlight nav
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.querySelector(`.nav-item[data-param="${subject}"]`)?.classList.add('active');
+
+            const subjectData = allData.filter(d => d.category_raw === subject);
+            const prices = subjectData.filter(d => d.price_per_hour).map(d => d.price_per_hour);
+            const avg = prices.length ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : 0;
+            const median = prices.length ? prices.sort((a,b) => a-b)[Math.floor(prices.length/2)] : 0;
+            const min = prices.length ? Math.min(...prices) : 0;
+            const max = prices.length ? Math.max(...prices) : 0;
+
+            document.getElementById('subject-stats').innerHTML = `
+                <div class="stat-card highlight"><div class="label">Toplam Kayıt</div><div class="value">${subjectData.length}</div></div>
+                <div class="stat-card"><div class="label">Ortalama Ücret</div><div class="value">${avg}₺</div></div>
+                <div class="stat-card"><div class="label">Medyan Ücret</div><div class="value">${median}₺</div></div>
+                <div class="stat-card"><div class="label">Min Ücret</div><div class="value">${min}₺</div></div>
+                <div class="stat-card"><div class="label">Max Ücret</div><div class="value">${max}₺</div></div>
+            `;
+
+            // City distribution for subject
+            const cityCounts = groupBy(subjectData, 'location_raw');
+            renderChart('chart-subject-cities', 'doughnut', Object.keys(cityCounts), Object.values(cityCounts).map(a => a.length));
+
+            // City prices for subject
+            const cityPrices = {};
+            Object.keys(cityCounts).forEach(c => {
+                const prices = cityCounts[c].filter(d => d.price_per_hour).map(d => d.price_per_hour);
+                cityPrices[c] = prices.length ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : 0;
+            });
+            renderBarChart('chart-subject-city-prices', Object.keys(cityPrices), Object.values(cityPrices), '₺');
+
+            // Price ranges for subject
+            const ranges = {'0-300': 0, '300-500': 0, '500-800': 0, '800-1200': 0, '1200-2000': 0, '2000+': 0};
+            subjectData.forEach(d => {
+                const p = d.price_per_hour;
+                if (!p) return;
+                if (p < 300) ranges['0-300']++;
+                else if (p < 500) ranges['300-500']++;
+                else if (p < 800) ranges['500-800']++;
+                else if (p < 1200) ranges['800-1200']++;
+                else if (p < 2000) ranges['1200-2000']++;
+                else ranges['2000+']++;
+            });
+            renderBarChart('chart-subject-price-ranges', Object.keys(ranges), Object.values(ranges));
+
+            // Table
+            renderTable('table-subject', subjectData);
+        }
+
+        function renderComparison() {
+            updateComparison();
+        }
+
+        function updateComparison() {
+            const type = document.getElementById('comparison-type').value;
+
+            if (type === 'city-by-subject') {
+                document.getElementById('filter-subject-group').style.display = 'block';
+                document.getElementById('filter-city-group').style.display = 'none';
+
+                const subject = document.getElementById('filter-subject').value;
+                document.getElementById('comparison-chart-title').textContent = `📊 ${capitalize(subject)} - Şehir Karşılaştırması`;
+
+                const subjectData = allData.filter(d => d.category_raw === subject);
+                const cityGroups = groupBy(subjectData, 'location_raw');
+
+                const labels = [];
+                const avgPrices = [];
+                const counts = [];
+
+                Object.keys(cityGroups).sort().forEach(city => {
+                    const prices = cityGroups[city].filter(d => d.price_per_hour).map(d => d.price_per_hour);
+                    if (prices.length > 0) {
+                        labels.push(city);
+                        avgPrices.push(Math.round(prices.reduce((a,b) => a+b, 0) / prices.length));
+                        counts.push(prices.length);
+                    }
+                });
+
+                renderComparisonChart('chart-comparison', labels, avgPrices, counts);
+                renderComparisonDetails(labels, avgPrices, counts, 'Şehir');
+
+            } else {
+                document.getElementById('filter-subject-group').style.display = 'none';
+                document.getElementById('filter-city-group').style.display = 'block';
+
+                const city = document.getElementById('filter-city').value;
+                document.getElementById('comparison-chart-title').textContent = `📊 ${city} - Ders Karşılaştırması`;
+
+                const cityData = allData.filter(d => d.location_raw === city);
+                const subjectGroups = groupBy(cityData, 'category_raw');
+
+                const labels = [];
+                const avgPrices = [];
+                const counts = [];
+
+                Object.keys(subjectGroups).sort().forEach(subject => {
+                    const prices = subjectGroups[subject].filter(d => d.price_per_hour).map(d => d.price_per_hour);
+                    if (prices.length > 0) {
+                        labels.push(capitalize(subject));
+                        avgPrices.push(Math.round(prices.reduce((a,b) => a+b, 0) / prices.length));
+                        counts.push(prices.length);
+                    }
+                });
+
+                renderComparisonChart('chart-comparison', labels, avgPrices, counts);
+                renderComparisonDetails(labels, avgPrices, counts, 'Ders');
+            }
+        }
+
+        function renderComparisonChart(canvasId, labels, prices, counts) {
+            if (charts[canvasId]) charts[canvasId].destroy();
+
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            charts[canvasId] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Ortalama Fiyat (₺)',
+                        data: prices,
+                        backgroundColor: colors.slice(0, labels.length),
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: (ctx) => `Kayıt Sayısı: ${counts[ctx.dataIndex]}`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#2a2a3a' },
+                            ticks: { color: '#888', callback: v => v + '₺' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#888' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderComparisonDetails(labels, prices, counts, type) {
+            const maxPrice = Math.max(...prices);
+            const container = document.getElementById('comparison-details');
+
+            // Sort by price descending
+            const sorted = labels.map((l, i) => ({ label: l, price: prices[i], count: counts[i] }))
+                .sort((a, b) => b.price - a.price);
+
+            container.innerHTML = `
+                <div class="comparison-card">
+                    <h4>🏆 En Yüksek Fiyatlar</h4>
+                    ${sorted.slice(0, 5).map((item, i) => `
+                        <div class="comparison-item">
+                            <span>${i + 1}. ${item.label}</span>
+                            <div class="bar-wrapper"><div class="bar" style="width: ${item.price / maxPrice * 100}%"></div></div>
+                            <span class="price">${item.price}₺</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="comparison-card">
+                    <h4>📉 En Düşük Fiyatlar</h4>
+                    ${sorted.slice(-5).reverse().map((item, i) => `
+                        <div class="comparison-item">
+                            <span>${sorted.length - 4 + i}. ${item.label}</span>
+                            <div class="bar-wrapper"><div class="bar" style="width: ${item.price / maxPrice * 100}%"></div></div>
+                            <span class="price">${item.price}₺</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="comparison-card">
+                    <h4>📊 En Çok Kayıt</h4>
+                    ${[...sorted].sort((a, b) => b.count - a.count).slice(0, 5).map((item, i) => `
+                        <div class="comparison-item">
+                            <span>${i + 1}. ${item.label}</span>
+                            <div class="bar-wrapper"><div class="bar" style="width: ${item.count / Math.max(...counts) * 100}%"></div></div>
+                            <span>${item.count} kayıt</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // Chart helpers
+        function renderChart(canvasId, type, labels, data) {
+            if (charts[canvasId]) charts[canvasId].destroy();
+
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            charts[canvasId] = new Chart(ctx, {
+                type: type,
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: colors.slice(0, labels.length),
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: '#888', boxWidth: 12, padding: 10 }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderBarChart(canvasId, labels, data, suffix = '') {
+            if (charts[canvasId]) charts[canvasId].destroy();
+
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            charts[canvasId] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: colors.slice(0, labels.length),
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: labels.length > 8 ? 'y' : 'x',
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#2a2a3a' },
+                            ticks: { color: '#888', callback: v => labels.length > 8 ? v : v + suffix }
+                        },
+                        x: {
+                            grid: { color: labels.length > 8 ? '#2a2a3a' : 'transparent' },
+                            ticks: { color: '#888', callback: v => labels.length > 8 ? v + suffix : v }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTable(tableId, data) {
+            const table = document.getElementById(tableId);
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Ders</th>
+                        <th>Şehir</th>
+                        <th>Fiyat</th>
+                        <th>Ders Tipi</th>
+                        <th>Deneyim</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${data.map(d => `
+                        <tr>
+                            <td class="clickable" onclick="showPage('subject', '${d.category_raw}')">${capitalize(d.category_raw || '-')}</td>
+                            <td class="clickable" onclick="showPage('city', '${d.location_raw}')">${d.location_raw || '-'}</td>
+                            <td class="price">${d.price_per_hour ? d.price_per_hour + '₺' : '-'}</td>
+                            <td>${formatLessonType(d.lesson_type)}</td>
+                            <td>${d.experience_raw || '-'}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+        }
+
+        // Utilities
+        function groupBy(arr, key) {
+            return arr.reduce((acc, item) => {
+                const k = item[key] || 'Bilinmiyor';
+                if (!acc[k]) acc[k] = [];
+                acc[k].push(item);
+                return acc;
+            }, {});
+        }
+
+        function capitalize(str) {
+            if (!str) return '';
+            return str.charAt(0).toUpperCase() + str.slice(1);
+        }
+
+        function formatLessonType(type) {
+            if (type === 'online') return '🌐 Online';
+            if (type === 'in_person') return '🏠 Yüz Yüze';
+            if (type === 'both') return '🔄 Her İkisi';
+            return '-';
+        }
+    </script>
+</body>
+</html>
