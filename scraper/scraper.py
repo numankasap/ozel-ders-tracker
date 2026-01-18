@@ -475,70 +475,138 @@ class OzeldersScaper:
         """Extract listings from the current page"""
         listings = []
         
-        # ozelders.com specific selectors - adjust based on actual site structure
-        # These are example selectors and may need adjustment
-        listing_cards = await page.query_selector_all('.ogretmen-listesi .ogretmen-kutu, .teacher-card, .listing-item')
+        # ozelders.com 2024 yapısı - öğretmen kartları
+        # Farklı selector kombinasyonlarını dene
+        selectors_to_try = [
+            'div.media',  # Bootstrap media object
+            'div.card',
+            'div.list-group-item',
+            'div[class*="uye"]',
+            'div[class*="ogretmen"]',
+            'div[class*="teacher"]',
+            'article',
+            '.row > div > div.border',
+            'a[href*="/uye/"]',
+        ]
         
+        listing_cards = []
+        for selector in selectors_to_try:
+            listing_cards = await page.query_selector_all(selector)
+            if listing_cards and len(listing_cards) > 0:
+                logger.info(f"    Found {len(listing_cards)} cards with selector: {selector}")
+                break
+        
+        # Eğer hala bulamadıysak, sayfadaki tüm linkleri tara
         if not listing_cards:
-            # Try alternative selectors
-            listing_cards = await page.query_selector_all('[class*="ogretmen"], [class*="teacher"], [class*="listing"]')
+            # Fiyat içeren elementleri bul
+            price_elements = await page.query_selector_all('text=/TL/')
+            logger.info(f"    Found {len(price_elements)} elements with TL text")
+            
+            # Alternatif: tüm profil linklerini bul
+            profile_links = await page.query_selector_all('a[href*="/uye/"], a[href*="/profil/"], a[href*="/ogretmen/"]')
+            if profile_links:
+                logger.info(f"    Found {len(profile_links)} profile links")
+                # Her link için parent container'ı bul
+                for link in profile_links:
+                    parent = await link.evaluate_handle('el => el.closest("div.media, div.card, div.row, article, div") || el.parentElement.parentElement')
+                    if parent:
+                        listing_cards.append(parent)
         
+        # Debug: Sayfa içeriğini logla
+        if not listing_cards:
+            page_content = await page.content()
+            if 'TL/Saat' in page_content or 'TL/saat' in page_content:
+                logger.info(f"    Page contains price info but couldn't find cards")
+            else:
+                logger.info(f"    Page might not have listings")
+        
+        seen_ids = set()
         for card in listing_cards:
             try:
                 listing = await self._parse_listing_card(card, category_url)
-                if listing:
+                if listing and listing.external_id not in seen_ids:
+                    seen_ids.add(listing.external_id)
                     listings.append(listing)
             except Exception as e:
                 logger.warning(f"Failed to parse listing card: {e}")
                 continue
         
+        logger.info(f"    Extracted {len(listings)} listings")
         return listings
     
     async def _parse_listing_card(self, card, category_url: str) -> Optional[ListingData]:
         """Parse a single listing card element"""
         try:
-            # Extract external ID from link or data attribute
-            link_elem = await card.query_selector('a[href*="/ogretmen/"], a[href*="/teacher/"]')
+            card_text = await card.inner_text()
+            
+            # External ID - profil linkinden al
+            link_elem = await card.query_selector('a[href*="/uye/"], a[href*="/profil/"], a[href*="/ogretmen/"]')
             if link_elem:
                 href = await link_elem.get_attribute('href')
                 external_id = self._extract_id_from_url(href)
             else:
-                # Generate ID from position if no link
-                external_id = f"ozelders_{hash(await card.inner_text())}"
+                # Hash ile unique ID oluştur
+                external_id = f"ozelders_{abs(hash(card_text)) % 10000000}"
             
-            # Extract price
-            price_elem = await card.query_selector('[class*="fiyat"], [class*="price"], [class*="ucret"]')
-            price_text = await price_elem.inner_text() if price_elem else None
-            price = PriceParser.parse(price_text)
+            # Fiyat - "850 TL/Saat" veya "2000 - 4000 TL/Saat" formatında
+            price = None
+            price_patterns = [
+                r'(\d+(?:\.\d+)?)\s*(?:-\s*\d+(?:\.\d+)?)?\s*TL/?[Ss]aat',
+                r'(\d+)\s*TL',
+            ]
+            for pattern in price_patterns:
+                match = re.search(pattern, card_text)
+                if match:
+                    price = float(match.group(1).replace('.', ''))
+                    break
             
-            # Extract location
-            location_elem = await card.query_selector('[class*="konum"], [class*="location"], [class*="sehir"], [class*="il"]')
-            location_text = await location_elem.inner_text() if location_elem else None
-            location = LocationParser.normalize(location_text)
+            # Eğer fiyat aralığı varsa ortalama al
+            range_match = re.search(r'(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*TL', card_text)
+            if range_match:
+                min_price = float(range_match.group(1).replace('.', ''))
+                max_price = float(range_match.group(2).replace('.', ''))
+                price = (min_price + max_price) / 2
             
-            # Extract lesson type
-            type_elem = await card.query_selector('[class*="ders-tipi"], [class*="lesson-type"], [class*="online"]')
-            type_text = await type_elem.inner_text() if type_elem else None
+            # Konum - "Beşiktaş, İstanbul" formatında
+            location = None
+            location_match = re.search(r'([A-Za-zığüşöçİĞÜŞÖÇ]+),\s*(İstanbul|Ankara|İzmir|Bursa|Antalya|[A-Za-zığüşöçİĞÜŞÖÇ]+)', card_text)
+            if location_match:
+                location = f"{location_match.group(1)}, {location_match.group(2)}"
+            else:
+                # Sadece şehir
+                cities = ['İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya', 'Adana', 'Konya', 'Gaziantep']
+                for city in cities:
+                    if city in card_text:
+                        location = city
+                        break
             
-            # Also check for online/offline badges
-            online_badge = await card.query_selector('[class*="online"], .badge-online')
-            if online_badge:
-                type_text = (type_text or '') + ' online'
+            # Online/Offline
+            lesson_type = 'both'
+            if 'Online Ders Veren' in card_text or 'Online' in card_text:
+                lesson_type = 'online'
+            if 'Offline' in card_text:
+                lesson_type = 'in_person' if lesson_type == 'both' else 'both'
             
-            lesson_type = LessonTypeParser.parse(type_text or await card.inner_text())
+            # Deneyim - "2015'den bu yana üye" formatından yıl hesapla
+            experience_raw = None
+            exp_match = re.search(r"(\d{4})'den bu yana", card_text)
+            if exp_match:
+                start_year = int(exp_match.group(1))
+                years = 2026 - start_year
+                experience_raw = f"{years} yıl"
             
-            # Extract experience
-            exp_elem = await card.query_selector('[class*="deneyim"], [class*="experience"], [class*="yil"]')
-            exp_text = await exp_elem.inner_text() if exp_elem else None
-            
-            # Extract category from URL
+            # Kategori
             category_raw = category_url.split('/')[-1] if category_url else None
             
-            # Build source URL
+            # Source URL
             source_url = None
             if link_elem:
                 href = await link_elem.get_attribute('href')
                 source_url = urljoin(self.BASE_URL, href)
+            
+            # Fiyat yoksa bu kaydı atla
+            if not price:
+                return None
             
             return ListingData(
                 platform_id=self.platform_id,
@@ -547,7 +615,7 @@ class OzeldersScaper:
                 category_raw=category_raw,
                 location_raw=location,
                 lesson_type=lesson_type,
-                experience_raw=exp_text,
+                experience_raw=experience_raw,
                 source_url=source_url
             )
             
