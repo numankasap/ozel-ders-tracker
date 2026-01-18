@@ -80,7 +80,7 @@ jobs:
     needs: check-biweekly
     if: needs.check-biweekly.outputs.should_run == 'true'
     runs-on: ubuntu-22.04  # Ubuntu 22.04 - Playwright ile daha uyumlu
-    timeout-minutes: 120
+    timeout-minutes: 360   # 6 saat timeout (anti-spam delays nedeniyle uzun sürecek)
     
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -121,9 +121,9 @@ jobs:
       - name: Run scraper with retry
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 90
-          max_attempts: 3
-          retry_wait_seconds: 300
+          timeout_minutes: 300  # 5 saat per attempt
+          max_attempts: 2       # 2 deneme yeterli
+          retry_wait_seconds: 600  # 10 dakika bekle
           command: |
             cd scraper
             DRY_RUN_FLAG=""
