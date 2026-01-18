@@ -503,9 +503,16 @@ class OzeldersScaper:
                 if self.city_subject_counts.get(city_subject_key, 0) >= self.MAX_PER_CITY_SUBJECT:
                     logger.info(f"  Reached limit for {city_subject_key}, stopping.")
                     break
-                
-                paginated_url = f"{full_url}?sayfa={page_num}" if page_num > 1 else full_url
-                
+
+                # Pagination: /20, /30, /40... (offset-based, not ?sayfa=)
+                # Page 1: base URL
+                # Page 2: /20, Page 3: /30, Page 4: /40...
+                if page_num == 1:
+                    paginated_url = full_url
+                else:
+                    offset = page_num * 10  # Page 2 = 20, Page 3 = 30, ...
+                    paginated_url = f"{full_url}/{offset}"
+
                 logger.info(f"  Page {page_num}: {paginated_url}")
                 
                 try:
@@ -938,48 +945,48 @@ class OzeldersScaper:
         return path.split('/')[-1] or f"hash_{hash(url)}"
     
     async def _has_next_page(self, page: Page) -> bool:
-        """Check if there's a next page"""
-        # ozelders.com pagination selectors
+        """Check if there's a next page - offset-based pagination (/20, /30, /40...)"""
+        import re
+
+        current_url = page.url
+        page_content = await page.content()
+
+        # URL'den mevcut offset'i al: /lise/matematik/30 -> 30
+        current_offset_match = re.search(r'/(\d+)/?$', current_url)
+        current_offset = int(current_offset_match.group(1)) if current_offset_match else 0
+
+        # Sayfa içeriğinde daha yüksek offset var mı?
+        # Pattern: href="/ders-verenler/lise/matematik/40"
+        offset_links = re.findall(r'href="[^"]*?/(\d+)"', page_content)
+        if offset_links:
+            # Sadece pagination offset'lerini al (10'un katları, 20+)
+            valid_offsets = [int(o) for o in offset_links if int(o) >= 20 and int(o) % 10 == 0]
+            if valid_offsets:
+                max_offset = max(valid_offsets)
+                if max_offset > current_offset:
+                    logger.info(f"    Found higher offset: {max_offset} (current: {current_offset})")
+                    return True
+
+        # Pagination linkleri kontrol et
         selectors = [
-            'a.page-link[href*="sayfa"]',  # Bootstrap pagination
-            'a[href*="sayfa="]',
-            '.pagination a:not(.disabled)',
-            'a.next',
-            'a[rel="next"]',
-            '[class*="sonraki"]',
-            'li.page-item:not(.disabled) a',
             'a:has-text("»")',
             'a:has-text("Sonraki")',
+            '.pagination a:not(.disabled)',
+            'a.next',
         ]
-        
+
         for selector in selectors:
             try:
                 next_btn = await page.query_selector(selector)
                 if next_btn:
                     href = await next_btn.get_attribute('href')
-                    logger.info(f"    Found next page link: {href}")
-                    return True
+                    if href and re.search(r'/\d+/?$', href):
+                        logger.info(f"    Found next page link: {href}")
+                        return True
             except:
                 continue
-        
-        # Alternatif: Sayfa numaralarını kontrol et
-        page_content = await page.content()
-        current_url = page.url
-        
-        # URL'den mevcut sayfa numarasını al
-        import re
-        current_page_match = re.search(r'sayfa=(\d+)', current_url)
-        current_page = int(current_page_match.group(1)) if current_page_match else 1
-        
-        # Sayfa içeriğinde daha yüksek sayfa numarası var mı?
-        page_numbers = re.findall(r'sayfa=(\d+)', page_content)
-        if page_numbers:
-            max_page = max(int(p) for p in page_numbers)
-            if max_page > current_page:
-                logger.info(f"    Found higher page number: {max_page} (current: {current_page})")
-                return True
-        
-        logger.info(f"    No next page found")
+
+        logger.info(f"    No next page found (current offset: {current_offset})")
         return False
     
     async def _process_listing(self, listing: ListingData, city_subject_key: str = None) -> bool:
