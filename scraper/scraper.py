@@ -490,11 +490,14 @@ class OzeldersScaper:
         logger.info(f"Scraping: {full_url} (current count: {current_count})")
         
         page = await self._create_page(browser)
-        
+
+        # Kategori boyunca görülen ID'leri takip et (sayfalar arası duplicate önleme)
+        category_seen_ids = set()
+
         try:
             page_num = 1
             category_count = 0
-            
+
             while page_num <= config.MAX_PAGES_PER_CATEGORY:
                 # Limit kontrolü
                 if self.city_subject_counts.get(city_subject_key, 0) >= self.MAX_PER_CITY_SUBJECT:
@@ -509,8 +512,8 @@ class OzeldersScaper:
                     await page.goto(paginated_url, wait_until='networkidle')
                     await asyncio.sleep(1)  # Wait for dynamic content
                     
-                    listings = await self._extract_listings(page, path, city_subject_key)
-                    
+                    listings = await self._extract_listings(page, path, city_subject_key, category_seen_ids)
+
                     if not listings:
                         logger.info(f"  No more listings found, stopping.")
                         break
@@ -542,9 +545,12 @@ class OzeldersScaper:
         finally:
             await page.close()
     
-    async def _extract_listings(self, page: Page, path: str, city_subject_key: str) -> List[ListingData]:
+    async def _extract_listings(self, page: Page, path: str, city_subject_key: str, category_seen_ids: set = None) -> List[ListingData]:
         """Extract listings from the current page"""
         import re
+
+        if category_seen_ids is None:
+            category_seen_ids = set()
 
         listings = []
 
@@ -582,10 +588,21 @@ class OzeldersScaper:
         seen_names = set()  # İsim bazlı duplicate kontrolü
         skipped_inactive = 0
         
+        skipped_premium = 0
+        skipped_duplicate = 0
+
         for i, block in enumerate(teacher_blocks):
             if 'TL' not in block:
                 continue
-            
+
+            # *** PREMIUM/TANITIM KONTROLÜ ***
+            # Ücretli ilanları atla - bunlar her sayfada tekrar gösteriliyor
+            premium_markers = ['Tanıtım', 'TANITIM', 'Sponsorlu', 'SPONSORLU', 'Premium', 'PREMIUM', 'Reklam']
+            is_premium = any(marker in block for marker in premium_markers)
+            if is_premium:
+                skipped_premium += 1
+                continue
+
             # *** AKTİVİTE KONTROLÜ ***
             # "Bugün", "1 gün önce", "2 gün önce" ... "4 hafta önce" kabul edilir
             # "1 ay önce", "2 ay önce" gibi olanlar atlanır
@@ -662,6 +679,11 @@ class OzeldersScaper:
             try:
                 listing = self._parse_text_block(block, path, city_subject_key, i, name_line)
                 if listing:
+                    # Kategori boyunca duplicate kontrolü (önceki sayfalarda görüldü mü?)
+                    if listing.external_id in category_seen_ids:
+                        skipped_duplicate += 1
+                        continue
+                    category_seen_ids.add(listing.external_id)
                     listings.append(listing)
                     logger.debug(f"      ✓ Parsed: {name_line[:30]} -> {listing.external_id} ({listing.price_per_hour} TL)")
                 else:
@@ -670,9 +692,13 @@ class OzeldersScaper:
                 logger.warning(f"Failed to parse block: {e}")
                 continue
         
+        if skipped_premium > 0:
+            logger.info(f"    Skipped {skipped_premium} premium/sponsored listings")
+        if skipped_duplicate > 0:
+            logger.info(f"    Skipped {skipped_duplicate} duplicates (seen in previous pages)")
         if skipped_inactive > 0:
             logger.info(f"    Skipped {skipped_inactive} inactive users (>30 days)")
-        
+
         # Kaydedilen isimleri logla
         if listings:
             names_preview = [l.external_id for l in listings[:5]]
