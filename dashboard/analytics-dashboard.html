@@ -568,53 +568,19 @@
 
         async function loadAllData() {
             try {
-                // Fetch ALL data using Range header (Supabase pagination)
-                let allRecords = [];
-                let start = 0;
-                const batchSize = 1000;
+                const res = await fetch(`${supabaseUrl}/rest/v1/listings?select=*`, {
+                    headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+                });
 
-                while (true) {
-                    const end = start + batchSize - 1;
-                    const response = await fetch(
-                        `${supabaseUrl}/rest/v1/listings?select=*&order=created_at.desc`,
-                        {
-                            headers: {
-                                'apikey': supabaseKey,
-                                'Authorization': `Bearer ${supabaseKey}`,
-                                'Range': `${start}-${end}`,
-                                'Prefer': 'count=exact'
-                            }
-                        }
-                    );
+                if (!res.ok) throw new Error(res.status);
 
-                    if (!response.ok) {
-                        // If 416 Range Not Satisfiable, we've reached the end
-                        if (response.status === 416) break;
-                        throw new Error(`HTTP ${response.status}`);
-                    }
+                allData = await res.json();
+                console.log(`Loaded ${allData.length} records`);
 
-                    const data = await response.json();
-                    if (!data || data.length === 0) break;
-
-                    allRecords = allRecords.concat(data);
-                    console.log(`Loaded ${allRecords.length} records so far...`);
-
-                    // Check Content-Range header to see if there's more
-                    const contentRange = response.headers.get('Content-Range');
-                    if (contentRange) {
-                        const match = contentRange.match(/(\d+)-(\d+)\/(\d+)/);
-                        if (match) {
-                            const total = parseInt(match[3]);
-                            if (allRecords.length >= total) break;
-                        }
-                    }
-
-                    if (data.length < batchSize) break;
-                    start += batchSize;
+                if (allData.length === 0) {
+                    alert('Veritabanında kayıt bulunamadı.');
+                    return;
                 }
-
-                allData = allRecords;
-                console.log(`Total loaded: ${allData.length} records`);
 
                 buildNavigation();
                 showPage('overview');
