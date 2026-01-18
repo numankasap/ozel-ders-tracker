@@ -652,7 +652,10 @@ class OzeldersScaper:
             lines = block.strip().split('\n')
             name = lines[0].strip() if lines else f"unknown_{index}"
         
-        # External ID - isim bazlı hash (tutarlı ve unique)
+        # Branş bilgisini al: city_subject_key = "istanbul_matematik" -> "matematik"
+        subject = city_subject_key.split('_')[-1] if '_' in city_subject_key else 'unknown'
+        
+        # External ID - isim + branş bazlı hash (tutarlı ve unique)
         # İsmi normalize et: küçük harf, boşlukları _ ile değiştir
         name_normalized = name.lower().replace(' ', '_').replace('.', '')
         # Türkçe karakterleri dönüştür
@@ -661,8 +664,10 @@ class OzeldersScaper:
         for tr, en in tr_chars.items():
             name_normalized = name_normalized.replace(tr, en)
         
-        # MD5 hash'in ilk 8 karakteri + isim
-        name_hash = hashlib.md5(name_normalized.encode()).hexdigest()[:8]
+        # İsim + branş kombinasyonu ile hash oluştur
+        # Böylece aynı kişi farklı branşlarda farklı ID alır
+        unique_key = f"{name_normalized}_{subject}"
+        name_hash = hashlib.md5(unique_key.encode()).hexdigest()[:8]
         external_id = f"oz_{name_hash}"
         
         # Fiyat - "850 TL/Saat" veya "2000 - 4000 TL/Saat" formatında
