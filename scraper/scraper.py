@@ -555,16 +555,29 @@ class OzeldersScaper:
             main_section = all_text.split('Öne Çıkan Ders Verenler')[0]
             logger.info(f"    Filtered out 'Öne Çıkan' section")
         
+        # Sayfa numaralarını da çıkar (1234» gibi)
+        # "»" karakterinden önceki kısmı al
+        if '»' in main_section:
+            main_section = main_section.split('»')[0]
+            # Son satırdaki sayfa numaralarını temizle
+            lines = main_section.split('\n')
+            # Sondan geriye doğru sayı satırlarını kaldır
+            while lines and re.match(r'^[\d\s]+$', lines[-1].strip()):
+                lines.pop()
+            main_section = '\n'.join(lines)
+        
         # Ayrıca "Başarı Hikayeleri" ve footer'ı da çıkar
         if 'Başarı Hikayeleri' in main_section:
             main_section = main_section.split('Başarı Hikayeleri')[0]
         
         import re
         
-        # Öğretmen bloklarını bul
-        blocks = re.split(r'(?=\n[A-ZİĞÜŞÖÇa-zığüşöç]+ [A-ZİĞÜŞÖÇ]\.?\n|\n[A-ZİĞÜŞÖÇ][a-zığüşöç]+ [A-ZİĞÜŞÖÇ][a-zığüşöç]+\n)', main_section)
+        # Öğretmen bloklarını bul - "Offline" veya "Online" satırıyla biten bloklar
+        # Her öğretmen kartı "Offline" veya "Online Ders Veren" ile başlıyor veya bitiyor
+        # Strateji: "Offline\n" ile split yap
+        blocks = re.split(r'\nOffline\n|\nOffline$', main_section)
         
-        logger.info(f"    Found {len(blocks)} potential teacher blocks (excluding Öne Çıkan)")
+        logger.info(f"    Found {len(blocks)} potential teacher blocks (split by Offline)")
         
         seen_names = set()  # İsim bazlı duplicate kontrolü
         skipped_inactive = 0
@@ -587,9 +600,50 @@ class OzeldersScaper:
             
             name_line = lines[0].strip()
             
-            # İsim formatı kontrolü - "Ad S." veya "Ad Soyad" formatında olmalı
-            name_match = re.match(r'^([A-ZİĞÜŞÖÇa-zığüşöç]+\s+[A-ZİĞÜŞÖÇ]\.?)$|^([A-ZİĞÜŞÖÇ][a-zığüşöç]+\s+[A-ZİĞÜŞÖÇ][a-zığüşöç]+)$', name_line)
-            if not name_match:
+            # İsim formatı kontrolü - daha esnek
+            # Kabul edilen formatlar:
+            # - "Ad Soyad" (2 kelime)
+            # - "Ad S." (kısaltmalı)
+            # - "Ad Orta Soyad" (3 kelime)
+            # - "Ad Soyad Soyad" (3 kelime)
+            # - Özel karakterler içerebilir: (), -, +, ☑️, vb.
+            
+            # Temel kontrol: En az 2 karakter, sayı içermemeli (telefon no vs hariç)
+            # ve tipik başlıklar olmamalı
+            skip_patterns = [
+                r'^Ders Verenler',
+                r'^İstanbul',
+                r'^Ankara',
+                r'^Online',
+                r'^Offline',
+                r'^Öne Çıkan',
+                r'^Başarı Hikayeleri',
+                r'^Bize Ulaşın',
+                r'^Copyright',
+                r'^\d+$',  # Sadece sayı
+                r'^TL',
+                r'^Tüm ',
+                r'^Onaylı',
+                r'^Tanıtım',
+            ]
+            
+            should_skip = False
+            for pattern in skip_patterns:
+                if re.match(pattern, name_line):
+                    should_skip = True
+                    break
+            
+            if should_skip:
+                continue
+            
+            # İsim en az 2 kelime içermeli (boşlukla ayrılmış)
+            # veya "Ad S." formatında olmalı
+            words = name_line.split()
+            if len(words) < 2:
+                continue
+            
+            # Çok uzun satırlar isim değil (açıklama vs)
+            if len(name_line) > 50:
                 continue
             
             # Duplicate isim kontrolü (aynı sayfada)
@@ -601,13 +655,22 @@ class OzeldersScaper:
                 listing = self._parse_text_block(block, path, city_subject_key, i, name_line)
                 if listing:
                     listings.append(listing)
+                    logger.debug(f"      ✓ Parsed: {name_line[:30]} -> {listing.external_id} ({listing.price_per_hour} TL)")
+                else:
+                    logger.debug(f"      ✗ No price: {name_line[:30]}")
             except Exception as e:
                 logger.warning(f"Failed to parse block: {e}")
                 continue
         
         if skipped_inactive > 0:
             logger.info(f"    Skipped {skipped_inactive} inactive users (>30 days)")
-        logger.info(f"    Extracted {len(listings)} active unique listings")
+        
+        # Kaydedilen isimleri logla
+        if listings:
+            names_preview = [l.external_id for l in listings[:5]]
+            logger.info(f"    Extracted {len(listings)} active unique listings: {names_preview}...")
+        else:
+            logger.info(f"    Extracted 0 listings")
         return listings
     
     def _is_recently_active(self, block: str) -> bool:
