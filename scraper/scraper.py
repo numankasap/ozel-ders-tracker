@@ -544,6 +544,8 @@ class OzeldersScaper:
     
     async def _extract_listings(self, page: Page, path: str, city_subject_key: str) -> List[ListingData]:
         """Extract listings from the current page"""
+        import re
+        
         listings = []
         
         # Sayfa içeriğini al
@@ -569,8 +571,6 @@ class OzeldersScaper:
         # Ayrıca "Başarı Hikayeleri" ve footer'ı da çıkar
         if 'Başarı Hikayeleri' in main_section:
             main_section = main_section.split('Başarı Hikayeleri')[0]
-        
-        import re
         
         # Öğretmen bloklarını bul - "Offline" veya "Online" satırıyla biten bloklar
         # Her öğretmen kartı "Offline" veya "Online Ders Veren" ile başlıyor veya bitiyor
