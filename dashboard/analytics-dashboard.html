@@ -568,22 +568,13 @@
 
         async function loadAllData() {
             try {
-                // Simple fetch - Supabase returns max 1000 by default, we'll handle pagination
-                const response = await fetch(
-                    `${supabaseUrl}/rest/v1/listings?select=*&order=created_at.desc`,
-                    {
-                        headers: {
-                            'apikey': supabaseKey,
-                            'Authorization': `Bearer ${supabaseKey}`
-                        }
-                    }
-                );
+                const res = await fetch(`${supabaseUrl}/rest/v1/listings?select=*`, {
+                    headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+                });
 
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
+                if (!res.ok) throw new Error(res.status);
 
-                allData = await response.json();
+                allData = await res.json();
                 console.log(`Loaded ${allData.length} records`);
 
                 if (allData.length === 0) {
