@@ -545,45 +545,45 @@ class OzeldersScaper:
     async def _extract_listings(self, page: Page, path: str, city_subject_key: str) -> List[ListingData]:
         """Extract listings from the current page"""
         import re
-        
+
         listings = []
-        
+
         # Sayfa içeriğini al
         all_text = await page.inner_text('body')
-        
+
         # "Öne Çıkan Ders Verenler" bölümünü ayır - sadece ana listeyi al
         main_section = all_text
         if 'Öne Çıkan Ders Verenler' in all_text:
             main_section = all_text.split('Öne Çıkan Ders Verenler')[0]
             logger.info(f"    Filtered out 'Öne Çıkan' section")
-        
-        # Sayfa numaralarını da çıkar (1234» gibi)
-        # "»" karakterinden önceki kısmı al
-        if '»' in main_section:
-            main_section = main_section.split('»')[0]
-            # Son satırdaki sayfa numaralarını temizle
-            lines = main_section.split('\n')
-            # Sondan geriye doğru sayı satırlarını kaldır
-            while lines and re.match(r'^[\d\s]+$', lines[-1].strip()):
-                lines.pop()
-            main_section = '\n'.join(lines)
-        
+
         # Ayrıca "Başarı Hikayeleri" ve footer'ı da çıkar
         if 'Başarı Hikayeleri' in main_section:
             main_section = main_section.split('Başarı Hikayeleri')[0]
-        
-        # Öğretmen bloklarını bul - "Offline" veya "Online" satırıyla biten bloklar
-        # Her öğretmen kartı "Offline" veya "Online Ders Veren" ile başlıyor veya bitiyor
-        # Strateji: "Offline\n" ile split yap
-        blocks = re.split(r'\nOffline\n|\nOffline$', main_section)
-        
-        logger.info(f"    Found {len(blocks)} potential teacher blocks (split by Offline)")
+
+        # Debug: Sayfa içeriğinin bir kısmını logla
+        logger.debug(f"    Main section preview: {main_section[:500]}...")
+
+        # Öğretmen bloklarını bul - "bu yana üye" pattern'i ile split
+        # Her öğretmen kartı "XXXX'den bu yana üye" veya "XXXX'dan bu yana üye" içerir
+        # Pattern: 2015'den bu yana üye, 2020'den bu yana üye, vb.
+        blocks = re.split(r"(\d{4}'[dD]?[eE]?n bu yana üye)", main_section)
+
+        # Split sonucu: [önce, "2015'den bu yana üye", arada, "2020'den bu yana üye", sonra, ...]
+        # Blokları birleştir: her öğretmen = önceki text + "xxxx'den bu yana üye"
+        teacher_blocks = []
+        for i in range(0, len(blocks) - 1, 2):
+            if i + 1 < len(blocks):
+                block = blocks[i] + blocks[i + 1]
+                teacher_blocks.append(block)
+
+        logger.info(f"    Found {len(teacher_blocks)} potential teacher blocks (split by 'bu yana üye')")
         
         seen_names = set()  # İsim bazlı duplicate kontrolü
         skipped_inactive = 0
         
-        for i, block in enumerate(blocks):
-            if 'TL' not in block and 'bu yana üye' not in block:
+        for i, block in enumerate(teacher_blocks):
+            if 'TL' not in block:
                 continue
             
             # *** AKTİVİTE KONTROLÜ ***
@@ -593,57 +593,65 @@ class OzeldersScaper:
                 skipped_inactive += 1
                 continue
             
-            # İsmi çıkar (ilk satır genelde isim)
+            # İsmi çıkar - blok içindeki ilk geçerli isim satırı
             lines = block.strip().split('\n')
             if not lines:
                 continue
-            
-            name_line = lines[0].strip()
-            
-            # İsim formatı kontrolü - daha esnek
-            # Kabul edilen formatlar:
-            # - "Ad Soyad" (2 kelime)
-            # - "Ad S." (kısaltmalı)
-            # - "Ad Orta Soyad" (3 kelime)
-            # - "Ad Soyad Soyad" (3 kelime)
-            # - Özel karakterler içerebilir: (), -, +, ☑️, vb.
-            
-            # Temel kontrol: En az 2 karakter, sayı içermemeli (telefon no vs hariç)
-            # ve tipik başlıklar olmamalı
+
+            name_line = None
+
+            # İsim değil kelimeleri (atlanacak pattern'ler)
             skip_patterns = [
-                r'^Ders Verenler',
-                r'^İstanbul',
-                r'^Ankara',
-                r'^Online',
-                r'^Offline',
-                r'^Öne Çıkan',
-                r'^Başarı Hikayeleri',
-                r'^Bize Ulaşın',
-                r'^Copyright',
-                r'^\d+$',  # Sadece sayı
-                r'^TL',
-                r'^Tüm ',
-                r'^Onaylı',
-                r'^Tanıtım',
+                r'^Ders Verenler', r'^İstanbul', r'^Ankara', r'^İzmir', r'^Bursa',
+                r'^Antalya', r'^Adana', r'^Konya', r'^Gaziantep', r'^Kocaeli', r'^Mersin',
+                r'^Online', r'^Offline', r'^Öne Çıkan', r'^Başarı', r'^Bize Ulaşın',
+                r'^Copyright', r'^\d+$', r'^TL', r'^Tüm ', r'^Onaylı', r'^Tanıtım',
+                r'^Nasıl Çalışır', r'^Eğitmen Ara', r'^Blog', r'^Yardım', r'^Ders',
+                r'^Matematik', r'^Fizik', r'^Kimya', r'^Biyoloji', r'^Türkçe', r'^İngilizce',
+                r'^Lise', r'^Ortaokul', r'^İlkokul', r'^Üniversite', r'^Spor', r'^Müzik',
+                r'^OZELDERS', r'^Bugün', r'gün önce$', r'hafta önce$', r'ay önce$',
+                r'^Kadıköy', r'^Beşiktaş', r'^Bakırköy', r'^Üsküdar', r'^Kartal',
+                r'^Cambridge', r'^CAMBRIDGE', r'^Öğretmen', r'^Öğretmeni',
             ]
-            
-            should_skip = False
-            for pattern in skip_patterns:
-                if re.match(pattern, name_line):
-                    should_skip = True
-                    break
-            
-            if should_skip:
-                continue
-            
-            # İsim en az 2 kelime içermeli (boşlukla ayrılmış)
-            # veya "Ad S." formatında olmalı
-            words = name_line.split()
-            if len(words) < 2:
-                continue
-            
-            # Çok uzun satırlar isim değil (açıklama vs)
-            if len(name_line) > 50:
+
+            for line in lines:
+                line = line.strip()
+                if not line or len(line) < 3:
+                    continue
+
+                # Skip pattern kontrolü
+                should_skip = False
+                for pattern in skip_patterns:
+                    if re.search(pattern, line, re.IGNORECASE):
+                        should_skip = True
+                        break
+
+                if should_skip:
+                    continue
+
+                # İsim kriterleri:
+                # 1. En az 2 kelime (veya "Ad S." formatı)
+                # 2. Max 40 karakter
+                # 3. Sayı ile başlamamalı
+                # 4. TL içermemeli
+                words = line.split()
+                if len(words) < 2:
+                    continue
+                if len(line) > 40:
+                    continue
+                if re.match(r'^\d', line):
+                    continue
+                if 'TL' in line or '₺' in line:
+                    continue
+                # İçinde fiyat olmamalı
+                if re.search(r'\d{3,}', line):
+                    continue
+
+                # Bu muhtemelen isim
+                name_line = line
+                break
+
+            if not name_line:
                 continue
             
             # Duplicate isim kontrolü (aynı sayfada)
