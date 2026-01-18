@@ -475,64 +475,111 @@ class OzeldersScaper:
         """Extract listings from the current page"""
         listings = []
         
-        # ozelders.com 2024 yapısı - öğretmen kartları
-        # Farklı selector kombinasyonlarını dene
-        selectors_to_try = [
-            'div.media',  # Bootstrap media object
-            'div.card',
-            'div.list-group-item',
-            'div[class*="uye"]',
-            'div[class*="ogretmen"]',
-            'div[class*="teacher"]',
-            'article',
-            '.row > div > div.border',
-            'a[href*="/uye/"]',
-        ]
+        # Sayfa HTML'ini al
+        page_content = await page.content()
         
-        listing_cards = []
-        for selector in selectors_to_try:
-            listing_cards = await page.query_selector_all(selector)
-            if listing_cards and len(listing_cards) > 0:
-                logger.info(f"    Found {len(listing_cards)} cards with selector: {selector}")
-                break
+        # Profil linklerini bul - /uye-girisi önekli olabilir
+        profile_links = await page.query_selector_all('a[href*="/uye-girisi"]')
+        logger.info(f"    Found {len(profile_links)} profile links with /uye-girisi")
         
-        # Eğer hala bulamadıysak, sayfadaki tüm linkleri tara
-        if not listing_cards:
-            # Fiyat içeren elementleri bul
-            price_elements = await page.query_selector_all('text=/TL/')
-            logger.info(f"    Found {len(price_elements)} elements with TL text")
-            
-            # Alternatif: tüm profil linklerini bul
-            profile_links = await page.query_selector_all('a[href*="/uye/"], a[href*="/profil/"], a[href*="/ogretmen/"]')
-            if profile_links:
-                logger.info(f"    Found {len(profile_links)} profile links")
-                # Her link için parent container'ı bul
-                for link in profile_links:
-                    parent = await link.evaluate_handle('el => el.closest("div.media, div.card, div.row, article, div") || el.parentElement.parentElement')
-                    if parent:
-                        listing_cards.append(parent)
+        if not profile_links:
+            # Alternatif: Tüm içeren div'leri bul
+            profile_links = await page.query_selector_all('a[href*="ozelders.com/uye"]')
+            logger.info(f"    Found {len(profile_links)} profile links with ozelders.com/uye")
         
-        # Debug: Sayfa içeriğini logla
-        if not listing_cards:
-            page_content = await page.content()
-            if 'TL/Saat' in page_content or 'TL/saat' in page_content:
-                logger.info(f"    Page contains price info but couldn't find cards")
-            else:
-                logger.info(f"    Page might not have listings")
+        # Tüm metin bloklarını bul - her öğretmen kartı için
+        # Sayfadaki her "TL/Saat" içeren bloğu bul
+        all_text = await page.inner_text('body')
+        
+        # Her öğretmen kaydını ayır - "TL/Saat" veya "TL/saat" ile biten bloklar
+        import re
+        
+        # Öğretmen bloklarını bul - isim ile başlayıp fiyat ile biten
+        # Pattern: İsim + bilgiler + fiyat
+        blocks = re.split(r'\n(?=[A-ZİĞÜŞÖÇ][a-zığüşöç]+\s+[A-ZİĞÜŞÖÇ]\.)', all_text)
+        
+        logger.info(f"    Found {len(blocks)} potential teacher blocks")
         
         seen_ids = set()
-        for card in listing_cards:
+        for i, block in enumerate(blocks):
+            if 'TL' not in block:
+                continue
+                
             try:
-                listing = await self._parse_listing_card(card, category_url)
+                listing = self._parse_text_block(block, category_url, i)
                 if listing and listing.external_id not in seen_ids:
                     seen_ids.add(listing.external_id)
                     listings.append(listing)
             except Exception as e:
-                logger.warning(f"Failed to parse listing card: {e}")
+                logger.warning(f"Failed to parse block: {e}")
                 continue
         
         logger.info(f"    Extracted {len(listings)} listings")
         return listings
+    
+    def _parse_text_block(self, block: str, category_url: str, index: int) -> Optional[ListingData]:
+        """Parse a text block containing teacher info"""
+        import re
+        
+        # Fiyat - "850 TL/Saat" veya "2000 - 4000 TL/Saat" formatında
+        price = None
+        
+        # Önce aralık kontrolü
+        range_match = re.search(r'(\d+)\s*-\s*(\d+)\s*TL', block)
+        if range_match:
+            min_price = float(range_match.group(1))
+            max_price = float(range_match.group(2))
+            price = (min_price + max_price) / 2
+        else:
+            # Tek fiyat
+            price_match = re.search(r'(\d+)\s*TL/?[Ss]aat', block)
+            if price_match:
+                price = float(price_match.group(1))
+        
+        if not price:
+            return None
+        
+        # External ID - blok hash'i
+        external_id = f"ozelders_{abs(hash(block[:100])) % 10000000}"
+        
+        # Konum
+        location = None
+        location_match = re.search(r'([A-Za-zığüşöçİĞÜŞÖÇ]+),\s*(İstanbul|Ankara|İzmir|Bursa|Antalya|Konya|Gaziantep|Adana|Mersin|Kocaeli|Eskişehir|Diyarbakır)', block)
+        if location_match:
+            location = f"{location_match.group(1)}, {location_match.group(2)}"
+        else:
+            cities = ['İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya', 'Adana', 'Konya', 'Gaziantep', 'Mersin']
+            for city in cities:
+                if city in block:
+                    location = city
+                    break
+        
+        # Online/Offline
+        lesson_type = 'both'
+        if 'Online Ders Veren' in block:
+            lesson_type = 'online'
+        
+        # Deneyim
+        experience_raw = None
+        exp_match = re.search(r"(\d{4})'den bu yana", block)
+        if exp_match:
+            start_year = int(exp_match.group(1))
+            years = 2026 - start_year
+            experience_raw = f"{years} yıl"
+        
+        # Kategori
+        category_raw = category_url.split('/')[-1] if category_url else None
+        
+        return ListingData(
+            platform_id=self.platform_id,
+            external_id=external_id,
+            price_per_hour=price,
+            category_raw=category_raw,
+            location_raw=location,
+            lesson_type=lesson_type,
+            experience_raw=experience_raw,
+            source_url=None
+        )
     
     async def _parse_listing_card(self, card, category_url: str) -> Optional[ListingData]:
         """Parse a single listing card element"""
