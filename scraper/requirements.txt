@@ -1,6 +1,6 @@
 # =====================================================
 # TÜRKIYE ÖZEL DERS PİYASASI TRACKER
-# Python Dependencies (Fixed versions)
+# Python Dependencies
 # =====================================================
 
 # Core scraping
@@ -8,9 +8,8 @@ playwright==1.40.0
 beautifulsoup4==4.12.2
 lxml==5.1.0
 
-# Database - Fixed version for compatibility
-supabase==2.4.0
-httpx>=0.24.0,<0.28.0
+# Database - Latest stable
+supabase>=2.0.0,<3.0.0
 
 # Environment
 python-dotenv==1.0.0
