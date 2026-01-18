@@ -318,20 +318,22 @@ class OzeldersScaper:
     BASE_URL = 'https://www.ozelders.com'
     PLATFORM_NAME = 'ozelders'
     
-    # Category URLs to scrape
+    # Category URLs to scrape - Doğru URL yapısı: /ders-verenler/{seviye}/{ders}
     CATEGORIES = [
-        '/ders/matematik',
-        '/ders/fizik',
-        '/ders/kimya',
-        '/ders/biyoloji',
-        '/ders/turkce',
-        '/ders/ingilizce',
-        '/ders/almanca',
-        '/ders/fransizca',
-        '/ders/piyano',
-        '/ders/gitar',
-        '/ders/programlama',
-        '/ders/yuzme',
+        '/ders-verenler/lise/matematik',
+        '/ders-verenler/lise/fizik',
+        '/ders-verenler/lise/kimya',
+        '/ders-verenler/lise/biyoloji',
+        '/ders-verenler/lise/turkce',
+        '/ders-verenler/universite/ingilizce',
+        '/ders-verenler/universite/almanca',
+        '/ders-verenler/universite/fransizca',
+        '/ders-verenler/universite/piyano',
+        '/ders-verenler/universite/gitar',
+        '/ders-verenler/universite/programlama',
+        '/ders-verenler/universite/yuzme',
+        '/ders-verenler/ortaokul/matematik',
+        '/ders-verenler/ilkokul/matematik',
     ]
     
     def __init__(self, db: SupabaseClient, dry_run: bool = False):
