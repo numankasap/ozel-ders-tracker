@@ -23,7 +23,7 @@ from dataclasses import dataclass, asdict
 from urllib.parse import urljoin, urlparse
 
 from playwright.async_api import async_playwright, Page, Browser
-from supabase import create_client, Client
+from supabase import create_client
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -114,7 +114,7 @@ class SupabaseClient:
     def __init__(self):
         if not config.SUPABASE_URL or not config.SUPABASE_KEY:
             raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
-        self.client: Client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
+        self.client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
     
     def get_platform_id(self, platform_name: str) -> int:
         """Get platform ID by name"""
