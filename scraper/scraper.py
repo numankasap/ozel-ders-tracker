@@ -39,12 +39,18 @@ class Config:
     SUPABASE_URL: str = os.getenv('SUPABASE_URL', '')
     SUPABASE_KEY: str = os.getenv('SUPABASE_SERVICE_ROLE_KEY', '')
     
-    # Scraping settings
-    MIN_DELAY: float = 3.0  # Minimum delay between requests (seconds)
-    MAX_DELAY: float = 7.0  # Maximum delay between requests (seconds)
-    PAGE_TIMEOUT: int = 30000  # Page load timeout (ms)
-    MAX_RETRIES: int = 3
-    MAX_PAGES_PER_CATEGORY: int = 50  # Max pages to scrape per category
+    # Anti-spam settings - Agresif olmayan scraping
+    MIN_DELAY: float = 8.0   # Minimum delay between requests (seconds)
+    MAX_DELAY: float = 15.0  # Maximum delay between requests (seconds)
+    CATEGORY_DELAY: float = 30.0  # Delay between different categories (seconds)
+    PAGE_TIMEOUT: int = 45000  # Page load timeout (ms)
+    MAX_RETRIES: int = 2
+    MAX_PAGES_PER_CATEGORY: int = 10  # Max pages per category (100 kişi / ~20 kişi per sayfa = 5 sayfa yeterli)
+    
+    # Rate limiting
+    REQUESTS_PER_MINUTE: int = 4  # Max 4 request per minute
+    PAUSE_AFTER_REQUESTS: int = 20  # Her 20 request'te bir uzun mola
+    LONG_PAUSE_DURATION: float = 120.0  # 2 dakika mola
     
     # User agent rotation
     USER_AGENTS: List[str] = None
@@ -55,6 +61,7 @@ class Config:
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         ]
 
 config = Config()
@@ -318,23 +325,43 @@ class OzeldersScaper:
     BASE_URL = 'https://www.ozelders.com'
     PLATFORM_NAME = 'ozelders'
     
-    # Category URLs to scrape - Doğru URL yapısı: /ders-verenler/{seviye}/{ders}
-    CATEGORIES = [
-        '/ders-verenler/lise/matematik',
-        '/ders-verenler/lise/fizik',
-        '/ders-verenler/lise/kimya',
-        '/ders-verenler/lise/biyoloji',
-        '/ders-verenler/lise/turkce',
-        '/ders-verenler/universite/ingilizce',
-        '/ders-verenler/universite/almanca',
-        '/ders-verenler/universite/fransizca',
-        '/ders-verenler/universite/piyano',
-        '/ders-verenler/universite/gitar',
-        '/ders-verenler/universite/programlama',
-        '/ders-verenler/universite/yuzme',
-        '/ders-verenler/ortaokul/matematik',
-        '/ders-verenler/ilkokul/matematik',
+    # Şehirler - URL formatı: /ders-verenler/{sehir}/{seviye}/{ders}
+    CITIES = [
+        'istanbul',
+        'ankara', 
+        'izmir',
+        'bursa',
+        'antalya',
+        'adana',
+        'konya',
+        'gaziantep',
+        'kocaeli',
+        'mersin',
     ]
+    
+    # Branşlar - seviye/ders formatında
+    SUBJECTS = [
+        'lise/matematik',
+        'lise/fizik',
+        'lise/kimya',
+        'lise/biyoloji',
+        'lise/turkce',
+        'lise/ingilizce',
+        'ortaokul/matematik',
+        'ortaokul/ingilizce',
+        'ilkokul/matematik',
+        'universite/ingilizce',
+        'universite/almanca',
+        'universite/fransizca',
+        'universite/programlama',
+        'spor/yuzme',
+        'muzik/piyano',
+        'muzik/gitar',
+    ]
+    
+    # Limitler
+    MAX_PER_CITY_SUBJECT = 100  # Her şehir/branş için max kayıt
+    MAX_INACTIVE_DAYS = 30  # Son 30 gün aktif olmayanları atla
     
     def __init__(self, db: SupabaseClient, dry_run: bool = False):
         self.db = db
@@ -342,6 +369,19 @@ class OzeldersScaper:
         self.platform_id = None
         self.existing_ids: set = set()
         self.result: ScrapeResult = None
+        self.city_subject_counts: Dict[str, int] = {}  # Şehir/branş sayaçları
+        self.request_count: int = 0  # Anti-spam request counter
+        
+    def _generate_urls(self) -> List[str]:
+        """Şehir ve branş kombinasyonlarından URL'ler oluştur"""
+        urls = []
+        for city in self.CITIES:
+            for subject in self.SUBJECTS:
+                # Format: /ders-verenler/istanbul/lise/matematik
+                url = f'/ders-verenler/{city}/{subject}'
+                urls.append(url)
+        logger.info(f"Generated {len(urls)} URLs ({len(self.CITIES)} cities x {len(self.SUBJECTS)} subjects)")
+        return urls
         
     async def run(self):
         """Main scraping entry point"""
@@ -360,14 +400,21 @@ class OzeldersScaper:
             started_at=datetime.now()
         )
         
+        # URL'leri oluştur
+        category_urls = self._generate_urls()
+        
         try:
             async with async_playwright() as p:
                 browser = await self._launch_browser(p)
                 
                 try:
-                    for category_url in self.CATEGORIES:
+                    for i, category_url in enumerate(category_urls):
+                        logger.info(f"\n📚 Category {i+1}/{len(category_urls)}")
                         await self._scrape_category(browser, category_url)
-                        await self._random_delay()
+                        
+                        # Kategoriler arası uzun mola
+                        if i < len(category_urls) - 1:  # Son kategori değilse
+                            await self._category_delay()
                     
                     self.result.status = 'completed'
                     
@@ -429,15 +476,39 @@ class OzeldersScaper:
         return page
     
     async def _scrape_category(self, browser: Browser, category_url: str):
-        """Scrape all listings in a category"""
+        """Scrape all listings in a category with limits"""
         full_url = urljoin(self.BASE_URL, category_url)
-        logger.info(f"Scraping category: {full_url}")
+        
+        # Şehir/branş anahtarı oluştur (limit kontrolü için)
+        # /ders-verenler/istanbul/lise/matematik -> istanbul_matematik
+        parts = category_url.strip('/').split('/')
+        if len(parts) >= 4:
+            city = parts[1]
+            subject = parts[-1]
+            city_subject_key = f"{city}_{subject}"
+        else:
+            city_subject_key = category_url
+        
+        # Bu şehir/branş için mevcut sayaç
+        current_count = self.city_subject_counts.get(city_subject_key, 0)
+        if current_count >= self.MAX_PER_CITY_SUBJECT:
+            logger.info(f"  Skipping {city_subject_key}: already at limit ({current_count})")
+            return
+        
+        logger.info(f"Scraping: {full_url} (current count: {current_count})")
         
         page = await self._create_page(browser)
         
         try:
             page_num = 1
+            category_count = 0
+            
             while page_num <= config.MAX_PAGES_PER_CATEGORY:
+                # Limit kontrolü
+                if self.city_subject_counts.get(city_subject_key, 0) >= self.MAX_PER_CITY_SUBJECT:
+                    logger.info(f"  Reached limit for {city_subject_key}, stopping.")
+                    break
+                
                 paginated_url = f"{full_url}?sayfa={page_num}" if page_num > 1 else full_url
                 
                 logger.info(f"  Page {page_num}: {paginated_url}")
@@ -452,8 +523,14 @@ class OzeldersScaper:
                         logger.info(f"  No more listings found, stopping.")
                         break
                     
+                    # Listings'i işle (limit kontrolü ile)
                     for listing in listings:
-                        await self._process_listing(listing)
+                        if self.city_subject_counts.get(city_subject_key, 0) >= self.MAX_PER_CITY_SUBJECT:
+                            break
+                        
+                        saved = await self._process_listing(listing, city_subject_key)
+                        if saved:
+                            category_count += 1
                     
                     # Check if there's a next page
                     has_next = await self._has_next_page(page)
@@ -467,6 +544,8 @@ class OzeldersScaper:
                     logger.error(f"  Error on page {page_num}: {e}")
                     self.result.error_count += 1
                     break
+            
+            logger.info(f"  Category total: {category_count} saved for {city_subject_key}")
         
         finally:
             await page.close()
@@ -475,51 +554,124 @@ class OzeldersScaper:
         """Extract listings from the current page"""
         listings = []
         
-        # Sayfa HTML'ini al
-        page_content = await page.content()
-        
-        # Profil linklerini bul - /uye-girisi önekli olabilir
-        profile_links = await page.query_selector_all('a[href*="/uye-girisi"]')
-        logger.info(f"    Found {len(profile_links)} profile links with /uye-girisi")
-        
-        if not profile_links:
-            # Alternatif: Tüm içeren div'leri bul
-            profile_links = await page.query_selector_all('a[href*="ozelders.com/uye"]')
-            logger.info(f"    Found {len(profile_links)} profile links with ozelders.com/uye")
-        
-        # Tüm metin bloklarını bul - her öğretmen kartı için
-        # Sayfadaki her "TL/Saat" içeren bloğu bul
+        # Sayfa içeriğini al
         all_text = await page.inner_text('body')
         
-        # Her öğretmen kaydını ayır - "TL/Saat" veya "TL/saat" ile biten bloklar
+        # "Öne Çıkan Ders Verenler" bölümünü ayır - sadece ana listeyi al
+        main_section = all_text
+        if 'Öne Çıkan Ders Verenler' in all_text:
+            main_section = all_text.split('Öne Çıkan Ders Verenler')[0]
+            logger.info(f"    Filtered out 'Öne Çıkan' section")
+        
+        # Ayrıca "Başarı Hikayeleri" ve footer'ı da çıkar
+        if 'Başarı Hikayeleri' in main_section:
+            main_section = main_section.split('Başarı Hikayeleri')[0]
+        
         import re
         
-        # Öğretmen bloklarını bul - isim ile başlayıp fiyat ile biten
-        # Pattern: İsim + bilgiler + fiyat
-        blocks = re.split(r'\n(?=[A-ZİĞÜŞÖÇ][a-zığüşöç]+\s+[A-ZİĞÜŞÖÇ]\.)', all_text)
+        # Öğretmen bloklarını bul
+        blocks = re.split(r'(?=\n[A-ZİĞÜŞÖÇa-zığüşöç]+ [A-ZİĞÜŞÖÇ]\.?\n|\n[A-ZİĞÜŞÖÇ][a-zığüşöç]+ [A-ZİĞÜŞÖÇ][a-zığüşöç]+\n)', main_section)
         
-        logger.info(f"    Found {len(blocks)} potential teacher blocks")
+        logger.info(f"    Found {len(blocks)} potential teacher blocks (excluding Öne Çıkan)")
         
-        seen_ids = set()
+        seen_names = set()  # İsim bazlı duplicate kontrolü
+        skipped_inactive = 0
+        
         for i, block in enumerate(blocks):
-            if 'TL' not in block:
+            if 'TL' not in block and 'bu yana üye' not in block:
                 continue
-                
+            
+            # *** AKTİVİTE KONTROLÜ ***
+            # "Bugün", "1 gün önce", "2 gün önce" ... "4 hafta önce" kabul edilir
+            # "1 ay önce", "2 ay önce" gibi olanlar atlanır
+            if not self._is_recently_active(block):
+                skipped_inactive += 1
+                continue
+            
+            # İsmi çıkar (ilk satır genelde isim)
+            lines = block.strip().split('\n')
+            if not lines:
+                continue
+            
+            name_line = lines[0].strip()
+            
+            # İsim formatı kontrolü - "Ad S." veya "Ad Soyad" formatında olmalı
+            name_match = re.match(r'^([A-ZİĞÜŞÖÇa-zığüşöç]+\s+[A-ZİĞÜŞÖÇ]\.?)$|^([A-ZİĞÜŞÖÇ][a-zığüşöç]+\s+[A-ZİĞÜŞÖÇ][a-zığüşöç]+)$', name_line)
+            if not name_match:
+                continue
+            
+            # Duplicate isim kontrolü (aynı sayfada)
+            if name_line in seen_names:
+                continue
+            seen_names.add(name_line)
+            
             try:
-                listing = self._parse_text_block(block, category_url, i)
-                if listing and listing.external_id not in seen_ids:
-                    seen_ids.add(listing.external_id)
+                listing = self._parse_text_block(block, category_url, i, name_line)
+                if listing:
                     listings.append(listing)
             except Exception as e:
                 logger.warning(f"Failed to parse block: {e}")
                 continue
         
-        logger.info(f"    Extracted {len(listings)} listings")
+        if skipped_inactive > 0:
+            logger.info(f"    Skipped {skipped_inactive} inactive users (>30 days)")
+        logger.info(f"    Extracted {len(listings)} active unique listings")
         return listings
     
-    def _parse_text_block(self, block: str, category_url: str, index: int) -> Optional[ListingData]:
+    def _is_recently_active(self, block: str) -> bool:
+        """Son 30 gün içinde aktif mi kontrol et"""
+        import re
+        
+        # Aktif kabul edilen pattern'ler
+        active_patterns = [
+            r'Bugün',
+            r'\d+\s*gün önce',      # 1 gün önce, 2 gün önce, ... 
+            r'\d+\s*hafta önce',    # 1 hafta önce, 2 hafta önce, 3 hafta önce, 4 hafta önce
+        ]
+        
+        for pattern in active_patterns:
+            if re.search(pattern, block):
+                # Hafta kontrolü - 4 haftadan fazla = ~1 ay
+                hafta_match = re.search(r'(\d+)\s*hafta önce', block)
+                if hafta_match:
+                    weeks = int(hafta_match.group(1))
+                    if weeks > 4:
+                        return False
+                return True
+        
+        # "ay önce" varsa aktif değil
+        if re.search(r'\d+\s*ay önce', block):
+            return False
+        
+        # "yıl önce" varsa aktif değil
+        if re.search(r'\d+\s*yıl önce', block):
+            return False
+        
+        # Hiçbir aktivite bilgisi yoksa kabul et (muhtemelen yeni üye)
+        return True
+    
+    def _parse_text_block(self, block: str, category_url: str, index: int, name: str = None) -> Optional[ListingData]:
         """Parse a text block containing teacher info"""
         import re
+        import hashlib
+        
+        # İsim yoksa bloktan çıkar
+        if not name:
+            lines = block.strip().split('\n')
+            name = lines[0].strip() if lines else f"unknown_{index}"
+        
+        # External ID - isim bazlı hash (tutarlı ve unique)
+        # İsmi normalize et: küçük harf, boşlukları _ ile değiştir
+        name_normalized = name.lower().replace(' ', '_').replace('.', '')
+        # Türkçe karakterleri dönüştür
+        tr_chars = {'ı': 'i', 'ğ': 'g', 'ü': 'u', 'ş': 's', 'ö': 'o', 'ç': 'c',
+                    'İ': 'i', 'Ğ': 'g', 'Ü': 'u', 'Ş': 's', 'Ö': 'o', 'Ç': 'c'}
+        for tr, en in tr_chars.items():
+            name_normalized = name_normalized.replace(tr, en)
+        
+        # MD5 hash'in ilk 8 karakteri + isim
+        name_hash = hashlib.md5(name_normalized.encode()).hexdigest()[:8]
+        external_id = f"oz_{name_hash}"
         
         # Fiyat - "850 TL/Saat" veya "2000 - 4000 TL/Saat" formatında
         price = None
@@ -536,19 +688,43 @@ class OzeldersScaper:
             if price_match:
                 price = float(price_match.group(1))
         
+        # Fiyat yoksa bu kişiyi atla (ücretsiz üyeler fiyat göstermiyor)
         if not price:
             return None
         
-        # External ID - blok hash'i
-        external_id = f"ozelders_{abs(hash(block[:100])) % 10000000}"
-        
-        # Konum
+        # Konum - URL'den şehir bilgisini al
         location = None
+        
+        # URL'den şehri çıkar: /ders-verenler/istanbul/lise/matematik -> istanbul
+        url_city = None
+        url_parts = category_url.strip('/').split('/')
+        if len(url_parts) >= 2:
+            url_city_raw = url_parts[1]
+            # URL'deki şehir adını düzelt
+            city_map = {
+                'istanbul': 'İstanbul',
+                'ankara': 'Ankara',
+                'izmir': 'İzmir',
+                'bursa': 'Bursa',
+                'antalya': 'Antalya',
+                'adana': 'Adana',
+                'konya': 'Konya',
+                'gaziantep': 'Gaziantep',
+                'kocaeli': 'Kocaeli',
+                'mersin': 'Mersin',
+            }
+            url_city = city_map.get(url_city_raw.lower())
+        
+        # İlçe bilgisini bloktan çıkarmaya çalış
         location_match = re.search(r'([A-Za-zığüşöçİĞÜŞÖÇ]+),\s*(İstanbul|Ankara|İzmir|Bursa|Antalya|Konya|Gaziantep|Adana|Mersin|Kocaeli|Eskişehir|Diyarbakır)', block)
         if location_match:
             location = f"{location_match.group(1)}, {location_match.group(2)}"
+        elif url_city:
+            # URL'den şehri kullan
+            location = url_city
         else:
-            cities = ['İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya', 'Adana', 'Konya', 'Gaziantep', 'Mersin']
+            # Bloktan şehir bulmaya çalış
+            cities = ['İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya', 'Adana', 'Konya', 'Gaziantep', 'Mersin', 'Kocaeli']
             for city in cities:
                 if city in block:
                     location = city
@@ -559,15 +735,15 @@ class OzeldersScaper:
         if 'Online Ders Veren' in block:
             lesson_type = 'online'
         
-        # Deneyim
+        # Deneyim - üyelik yılından hesapla
         experience_raw = None
-        exp_match = re.search(r"(\d{4})'den bu yana", block)
+        exp_match = re.search(r"(\d{4})'?[dD]?[eE]?n bu yana", block)
         if exp_match:
             start_year = int(exp_match.group(1))
             years = 2026 - start_year
             experience_raw = f"{years} yıl"
         
-        # Kategori
+        # Kategori - URL'den al
         category_raw = category_url.split('/')[-1] if category_url else None
         
         return ListingData(
@@ -726,13 +902,15 @@ class OzeldersScaper:
         logger.info(f"    No next page found")
         return False
     
-    async def _process_listing(self, listing: ListingData):
-        """Process and save a listing"""
+    async def _process_listing(self, listing: ListingData, city_subject_key: str = None) -> bool:
+        """Process and save a listing. Returns True if saved."""
         self.result.total_listings += 1
         
         if self.dry_run:
             logger.info(f"  [DRY RUN] Would save: {listing.external_id} - {listing.price_per_hour} TL")
-            return
+            if city_subject_key:
+                self.city_subject_counts[city_subject_key] = self.city_subject_counts.get(city_subject_key, 0) + 1
+            return True
         
         is_new = listing.external_id not in self.existing_ids
         
@@ -740,19 +918,42 @@ class OzeldersScaper:
             self.db.upsert_listing(listing)
             self.existing_ids.add(listing.external_id)
             
+            # Şehir/branş sayacını artır
+            if city_subject_key:
+                self.city_subject_counts[city_subject_key] = self.city_subject_counts.get(city_subject_key, 0) + 1
+            
             if is_new:
                 self.result.new_listings += 1
             else:
                 self.result.updated_listings += 1
+            
+            return True
                 
         except Exception as e:
             logger.error(f"Failed to save listing {listing.external_id}: {e}")
             self.result.error_count += 1
+            return False
     
     async def _random_delay(self):
-        """Random delay between requests"""
+        """Random delay between requests with anti-spam protection"""
         import random
-        delay = random.uniform(config.MIN_DELAY, config.MAX_DELAY)
+        
+        self.request_count += 1
+        
+        # Her X request'te uzun mola ver
+        if self.request_count % config.PAUSE_AFTER_REQUESTS == 0:
+            logger.info(f"    🛑 Anti-spam pause: {config.LONG_PAUSE_DURATION}s after {self.request_count} requests")
+            await asyncio.sleep(config.LONG_PAUSE_DURATION)
+        else:
+            # Normal random delay
+            delay = random.uniform(config.MIN_DELAY, config.MAX_DELAY)
+            await asyncio.sleep(delay)
+    
+    async def _category_delay(self):
+        """Longer delay between categories"""
+        import random
+        delay = config.CATEGORY_DELAY + random.uniform(0, 10)
+        logger.info(f"  ⏸️ Category delay: {delay:.1f}s")
         await asyncio.sleep(delay)
     
     def _log_summary(self):
@@ -764,11 +965,19 @@ class OzeldersScaper:
         logger.info("=" * 50)
         logger.info(f"Platform: {self.PLATFORM_NAME}")
         logger.info(f"Status: {self.result.status}")
-        logger.info(f"Duration: {duration:.1f} seconds")
+        logger.info(f"Duration: {duration:.1f} seconds ({duration/60:.1f} minutes)")
+        logger.info(f"Total requests: {self.request_count}")
         logger.info(f"Total listings: {self.result.total_listings}")
         logger.info(f"New listings: {self.result.new_listings}")
         logger.info(f"Updated listings: {self.result.updated_listings}")
         logger.info(f"Errors: {self.result.error_count}")
+        
+        # Şehir/branş istatistikleri
+        logger.info("-" * 30)
+        logger.info("City/Subject counts:")
+        for key, count in sorted(self.city_subject_counts.items()):
+            logger.info(f"  {key}: {count}")
+        
         if self.result.error_message:
             logger.info(f"Error message: {self.result.error_message}")
         logger.info("=" * 50)
