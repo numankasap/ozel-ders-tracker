@@ -429,6 +429,16 @@
                     <label>Şehir Seçin</label>
                     <select id="filter-city" onchange="updateComparison()"></select>
                 </div>
+                <div class="filter-group">
+                    <label>Deneyim Filtresi</label>
+                    <select id="comparison-exp-filter" onchange="applyComparisonFilter()">
+                        <option value="all">Tümü</option>
+                        <option value="1-3">1-3 yıl</option>
+                        <option value="4-6">4-6 yıl</option>
+                        <option value="7-10">7-10 yıl</option>
+                        <option value="11-99">11+ yıl</option>
+                    </select>
+                </div>
             </div>
 
             <div class="charts-grid">
@@ -657,7 +667,18 @@
 
         function applyFilter() {
             currentFilter.experience = document.getElementById('exp-filter').value;
+            // Sync comparison filter
+            const compFilter = document.getElementById('comparison-exp-filter');
+            if (compFilter) compFilter.value = currentFilter.experience;
             showPage(document.querySelector('.page.active').id.replace('page-', ''));
+        }
+
+        function applyComparisonFilter() {
+            currentFilter.experience = document.getElementById('comparison-exp-filter').value;
+            // Sync overview filter
+            const expFilter = document.getElementById('exp-filter');
+            if (expFilter) expFilter.value = currentFilter.experience;
+            updateComparison();
         }
 
         function buildNavigation() {
