@@ -683,8 +683,48 @@ class OzeldersScaper:
     
     async def _has_next_page(self, page: Page) -> bool:
         """Check if there's a next page"""
-        next_btn = await page.query_selector('a.next, a[rel="next"], .pagination .next:not(.disabled), [class*="sonraki"]')
-        return next_btn is not None
+        # ozelders.com pagination selectors
+        selectors = [
+            'a.page-link[href*="sayfa"]',  # Bootstrap pagination
+            'a[href*="sayfa="]',
+            '.pagination a:not(.disabled)',
+            'a.next',
+            'a[rel="next"]',
+            '[class*="sonraki"]',
+            'li.page-item:not(.disabled) a',
+            'a:has-text("»")',
+            'a:has-text("Sonraki")',
+        ]
+        
+        for selector in selectors:
+            try:
+                next_btn = await page.query_selector(selector)
+                if next_btn:
+                    href = await next_btn.get_attribute('href')
+                    logger.info(f"    Found next page link: {href}")
+                    return True
+            except:
+                continue
+        
+        # Alternatif: Sayfa numaralarını kontrol et
+        page_content = await page.content()
+        current_url = page.url
+        
+        # URL'den mevcut sayfa numarasını al
+        import re
+        current_page_match = re.search(r'sayfa=(\d+)', current_url)
+        current_page = int(current_page_match.group(1)) if current_page_match else 1
+        
+        # Sayfa içeriğinde daha yüksek sayfa numarası var mı?
+        page_numbers = re.findall(r'sayfa=(\d+)', page_content)
+        if page_numbers:
+            max_page = max(int(p) for p in page_numbers)
+            if max_page > current_page:
+                logger.info(f"    Found higher page number: {max_page} (current: {current_page})")
+                return True
+        
+        logger.info(f"    No next page found")
+        return False
     
     async def _process_listing(self, listing: ListingData):
         """Process and save a listing"""
