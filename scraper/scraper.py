@@ -322,10 +322,10 @@ class ExperienceParser:
 class OzeldersScaper:
     """Scraper for ozelders.com"""
     
-    BASE_URL = 'https://www.ozelders.com'
+    BASE_URL = 'https://www.ozelders.com'  # Fallback
     PLATFORM_NAME = 'ozelders'
     
-    # Şehirler - URL formatı: /ders-verenler/{sehir}/{seviye}/{ders}
+    # Şehirler - Subdomain formatında kullanılacak
     CITIES = [
         'istanbul',
         'ankara', 
@@ -372,14 +372,16 @@ class OzeldersScaper:
         self.city_subject_counts: Dict[str, int] = {}  # Şehir/branş sayaçları
         self.request_count: int = 0  # Anti-spam request counter
         
-    def _generate_urls(self) -> List[str]:
-        """Şehir ve branş kombinasyonlarından URL'ler oluştur"""
+    def _generate_urls(self) -> List[tuple]:
+        """Şehir ve branş kombinasyonlarından URL'ler oluştur - subdomain formatında"""
         urls = []
         for city in self.CITIES:
             for subject in self.SUBJECTS:
-                # Format: /ders-verenler/istanbul/lise/matematik
-                url = f'/ders-verenler/{city}/{subject}'
-                urls.append(url)
+                # Format: https://istanbul.ozelders.com/ders-verenler/lise/matematik
+                base_url = f'https://{city}.ozelders.com'
+                path = f'/ders-verenler/{subject}'
+                city_subject_key = f"{city}_{subject.split('/')[-1]}"
+                urls.append((base_url, path, city_subject_key))
         logger.info(f"Generated {len(urls)} URLs ({len(self.CITIES)} cities x {len(self.SUBJECTS)} subjects)")
         return urls
         
@@ -408,9 +410,9 @@ class OzeldersScaper:
                 browser = await self._launch_browser(p)
                 
                 try:
-                    for i, category_url in enumerate(category_urls):
+                    for i, (base_url, path, city_subject_key) in enumerate(category_urls):
                         logger.info(f"\n📚 Category {i+1}/{len(category_urls)}")
-                        await self._scrape_category(browser, category_url)
+                        await self._scrape_category(browser, base_url, path, city_subject_key)
                         
                         # Kategoriler arası uzun mola
                         if i < len(category_urls) - 1:  # Son kategori değilse
@@ -475,19 +477,9 @@ class OzeldersScaper:
         
         return page
     
-    async def _scrape_category(self, browser: Browser, category_url: str):
+    async def _scrape_category(self, browser: Browser, base_url: str, path: str, city_subject_key: str):
         """Scrape all listings in a category with limits"""
-        full_url = urljoin(self.BASE_URL, category_url)
-        
-        # Şehir/branş anahtarı oluştur (limit kontrolü için)
-        # /ders-verenler/istanbul/lise/matematik -> istanbul_matematik
-        parts = category_url.strip('/').split('/')
-        if len(parts) >= 4:
-            city = parts[1]
-            subject = parts[-1]
-            city_subject_key = f"{city}_{subject}"
-        else:
-            city_subject_key = category_url
+        full_url = f"{base_url}{path}"
         
         # Bu şehir/branş için mevcut sayaç
         current_count = self.city_subject_counts.get(city_subject_key, 0)
@@ -517,7 +509,7 @@ class OzeldersScaper:
                     await page.goto(paginated_url, wait_until='networkidle')
                     await asyncio.sleep(1)  # Wait for dynamic content
                     
-                    listings = await self._extract_listings(page, category_url)
+                    listings = await self._extract_listings(page, path, city_subject_key)
                     
                     if not listings:
                         logger.info(f"  No more listings found, stopping.")
@@ -550,7 +542,7 @@ class OzeldersScaper:
         finally:
             await page.close()
     
-    async def _extract_listings(self, page: Page, category_url: str) -> List[ListingData]:
+    async def _extract_listings(self, page: Page, path: str, city_subject_key: str) -> List[ListingData]:
         """Extract listings from the current page"""
         listings = []
         
@@ -606,7 +598,7 @@ class OzeldersScaper:
             seen_names.add(name_line)
             
             try:
-                listing = self._parse_text_block(block, category_url, i, name_line)
+                listing = self._parse_text_block(block, path, city_subject_key, i, name_line)
                 if listing:
                     listings.append(listing)
             except Exception as e:
@@ -650,7 +642,7 @@ class OzeldersScaper:
         # Hiçbir aktivite bilgisi yoksa kabul et (muhtemelen yeni üye)
         return True
     
-    def _parse_text_block(self, block: str, category_url: str, index: int, name: str = None) -> Optional[ListingData]:
+    def _parse_text_block(self, block: str, path: str, city_subject_key: str, index: int, name: str = None) -> Optional[ListingData]:
         """Parse a text block containing teacher info"""
         import re
         import hashlib
@@ -692,43 +684,29 @@ class OzeldersScaper:
         if not price:
             return None
         
-        # Konum - URL'den şehir bilgisini al
-        location = None
+        # Konum - city_subject_key'den şehir bilgisini al
+        # city_subject_key format: "istanbul_matematik"
+        city_raw = city_subject_key.split('_')[0] if '_' in city_subject_key else None
         
-        # URL'den şehri çıkar: /ders-verenler/istanbul/lise/matematik -> istanbul
-        url_city = None
-        url_parts = category_url.strip('/').split('/')
-        if len(url_parts) >= 2:
-            url_city_raw = url_parts[1]
-            # URL'deki şehir adını düzelt
-            city_map = {
-                'istanbul': 'İstanbul',
-                'ankara': 'Ankara',
-                'izmir': 'İzmir',
-                'bursa': 'Bursa',
-                'antalya': 'Antalya',
-                'adana': 'Adana',
-                'konya': 'Konya',
-                'gaziantep': 'Gaziantep',
-                'kocaeli': 'Kocaeli',
-                'mersin': 'Mersin',
-            }
-            url_city = city_map.get(url_city_raw.lower())
+        city_map = {
+            'istanbul': 'İstanbul',
+            'ankara': 'Ankara',
+            'izmir': 'İzmir',
+            'bursa': 'Bursa',
+            'antalya': 'Antalya',
+            'adana': 'Adana',
+            'konya': 'Konya',
+            'gaziantep': 'Gaziantep',
+            'kocaeli': 'Kocaeli',
+            'mersin': 'Mersin',
+        }
+        
+        location = city_map.get(city_raw)
         
         # İlçe bilgisini bloktan çıkarmaya çalış
-        location_match = re.search(r'([A-Za-zığüşöçİĞÜŞÖÇ]+),\s*(İstanbul|Ankara|İzmir|Bursa|Antalya|Konya|Gaziantep|Adana|Mersin|Kocaeli|Eskişehir|Diyarbakır)', block)
+        location_match = re.search(r'([A-Za-zığüşöçİĞÜŞÖÇ]+),\s*(İstanbul|Ankara|İzmir|Bursa|Antalya|Konya|Gaziantep|Adana|Mersin|Kocaeli)', block)
         if location_match:
             location = f"{location_match.group(1)}, {location_match.group(2)}"
-        elif url_city:
-            # URL'den şehri kullan
-            location = url_city
-        else:
-            # Bloktan şehir bulmaya çalış
-            cities = ['İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Antalya', 'Adana', 'Konya', 'Gaziantep', 'Mersin', 'Kocaeli']
-            for city in cities:
-                if city in block:
-                    location = city
-                    break
         
         # Online/Offline
         lesson_type = 'both'
@@ -743,8 +721,8 @@ class OzeldersScaper:
             years = 2026 - start_year
             experience_raw = f"{years} yıl"
         
-        # Kategori - URL'den al
-        category_raw = category_url.split('/')[-1] if category_url else None
+        # Kategori - path'den al: /ders-verenler/lise/matematik -> matematik
+        category_raw = path.split('/')[-1] if path else None
         
         return ListingData(
             platform_id=self.platform_id,
