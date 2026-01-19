@@ -1,0 +1,21 @@
+# Türk Futbolu Veri Toplayıcı - Bağımlılıklar
+
+# HTTP istekleri
+requests>=2.31.0
+
+# Web scraping
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+
+# Playwright (dinamik siteler için)
+playwright>=1.41.0
+
+# Anti-bot bypass
+cloudscraper>=1.2.71
+
+# Veri işleme
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Çevre değişkenleri
+python-dotenv>=1.0.0
