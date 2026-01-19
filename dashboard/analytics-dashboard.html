@@ -730,31 +730,49 @@
                 <div class="stat-card"><div class="label">Online Ders</div><div class="value">${onlineCount}</div></div>
             `;
 
-            // Subject distribution
+            // Subject distribution - sorted by count ascending
             const subjectCounts = groupBy(data, 'category_raw');
-            renderChart('chart-subjects', 'doughnut', Object.keys(subjectCounts).map(capitalize), Object.values(subjectCounts).map(a => a.length));
+            const subjectCountsSorted = Object.entries(subjectCounts)
+                .map(([k, v]) => ({ label: capitalize(k), value: v.length }))
+                .sort((a, b) => a.value - b.value);
+            renderVerticalBarChart('chart-subjects', subjectCountsSorted.map(i => i.label), subjectCountsSorted.map(i => i.value));
 
-            // Subject prices
-            const subjectPrices = {};
+            // Subject prices - sorted by price ascending
+            const subjectPriceItems = [];
             Object.keys(subjectCounts).forEach(s => {
                 const prices = subjectCounts[s].filter(d => d.price_per_hour).map(d => d.price_per_hour);
-                subjectPrices[s] = prices.length ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : 0;
+                if (prices.length > 0) {
+                    subjectPriceItems.push({
+                        label: capitalize(s),
+                        value: Math.round(prices.reduce((a,b) => a+b, 0) / prices.length)
+                    });
+                }
             });
-            renderBarChart('chart-subject-prices', Object.keys(subjectPrices).map(capitalize), Object.values(subjectPrices), '₺');
+            subjectPriceItems.sort((a, b) => a.value - b.value);
+            renderVerticalBarChart('chart-subject-prices', subjectPriceItems.map(i => i.label), subjectPriceItems.map(i => i.value), '₺');
 
-            // City distribution (şehir bazlı)
+            // City distribution - sorted by count ascending
             const cityCounts = groupBy(data, 'city');
-            renderChart('chart-cities', 'doughnut', Object.keys(cityCounts), Object.values(cityCounts).map(a => a.length));
+            const cityCountsSorted = Object.entries(cityCounts)
+                .map(([k, v]) => ({ label: k, value: v.length }))
+                .sort((a, b) => a.value - b.value);
+            renderVerticalBarChart('chart-cities', cityCountsSorted.map(i => i.label), cityCountsSorted.map(i => i.value));
 
-            // City prices
-            const cityPrices = {};
+            // City prices - sorted by price ascending
+            const cityPriceItems = [];
             Object.keys(cityCounts).forEach(c => {
                 const prices = cityCounts[c].filter(d => d.price_per_hour).map(d => d.price_per_hour);
-                cityPrices[c] = prices.length ? Math.round(prices.reduce((a,b) => a+b, 0) / prices.length) : 0;
+                if (prices.length > 0) {
+                    cityPriceItems.push({
+                        label: c,
+                        value: Math.round(prices.reduce((a,b) => a+b, 0) / prices.length)
+                    });
+                }
             });
-            renderBarChart('chart-city-prices', Object.keys(cityPrices), Object.values(cityPrices), '₺');
+            cityPriceItems.sort((a, b) => a.value - b.value);
+            renderVerticalBarChart('chart-city-prices', cityPriceItems.map(i => i.label), cityPriceItems.map(i => i.value), '₺');
 
-            // Price ranges
+            // Price ranges (keep order as is - already logical)
             const ranges = {'0-300': 0, '300-500': 0, '500-800': 0, '800-1200': 0, '1200-2000': 0, '2000+': 0};
             data.forEach(d => {
                 const p = d.price_per_hour;
@@ -766,7 +784,7 @@
                 else if (p < 2000) ranges['1200-2000']++;
                 else ranges['2000+']++;
             });
-            renderBarChart('chart-price-ranges', Object.keys(ranges), Object.values(ranges));
+            renderVerticalBarChart('chart-price-ranges', Object.keys(ranges), Object.values(ranges));
 
             // Full table
             renderTable('table-all', data);
@@ -1093,6 +1111,44 @@
                         x: {
                             grid: { color: labels.length > 8 ? '#2a2a3a' : 'transparent' },
                             ticks: { color: '#888', callback: v => labels.length > 8 ? v + suffix : v }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderVerticalBarChart(canvasId, labels, data, suffix = '') {
+            if (charts[canvasId]) charts[canvasId].destroy();
+
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            charts[canvasId] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: colors.slice(0, labels.length),
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'x',
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#2a2a3a' },
+                            ticks: { color: '#888', callback: v => v + suffix }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                color: '#888',
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
                         }
                     }
                 }
