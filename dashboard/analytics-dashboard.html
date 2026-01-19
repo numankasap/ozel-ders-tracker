@@ -900,18 +900,23 @@
                 const subjectData = data.filter(d => d.category_raw === subject);
                 const cityGroups = groupBy(subjectData, 'city');
 
-                const labels = [];
-                const avgPrices = [];
-                const counts = [];
-
-                Object.keys(cityGroups).sort().forEach(city => {
+                // Collect data and sort by price (ascending)
+                const items = [];
+                Object.keys(cityGroups).forEach(city => {
                     const prices = cityGroups[city].filter(d => d.price_per_hour).map(d => d.price_per_hour);
                     if (prices.length > 0) {
-                        labels.push(city);
-                        avgPrices.push(Math.round(prices.reduce((a,b) => a+b, 0) / prices.length));
-                        counts.push(prices.length);
+                        items.push({
+                            label: city,
+                            price: Math.round(prices.reduce((a,b) => a+b, 0) / prices.length),
+                            count: prices.length
+                        });
                     }
                 });
+                items.sort((a, b) => a.price - b.price);
+
+                const labels = items.map(i => i.label);
+                const avgPrices = items.map(i => i.price);
+                const counts = items.map(i => i.count);
 
                 renderComparisonChart('chart-comparison', labels, avgPrices, counts);
                 renderComparisonDetails(labels, avgPrices, counts, 'Şehir');
@@ -926,18 +931,23 @@
                 const cityData = data.filter(d => d.city === city);
                 const subjectGroups = groupBy(cityData, 'category_raw');
 
-                const labels = [];
-                const avgPrices = [];
-                const counts = [];
-
-                Object.keys(subjectGroups).sort().forEach(subject => {
+                // Collect data and sort by price (ascending)
+                const items = [];
+                Object.keys(subjectGroups).forEach(subject => {
                     const prices = subjectGroups[subject].filter(d => d.price_per_hour).map(d => d.price_per_hour);
                     if (prices.length > 0) {
-                        labels.push(capitalize(subject));
-                        avgPrices.push(Math.round(prices.reduce((a,b) => a+b, 0) / prices.length));
-                        counts.push(prices.length);
+                        items.push({
+                            label: capitalize(subject),
+                            price: Math.round(prices.reduce((a,b) => a+b, 0) / prices.length),
+                            count: prices.length
+                        });
                     }
                 });
+                items.sort((a, b) => a.price - b.price);
+
+                const labels = items.map(i => i.label);
+                const avgPrices = items.map(i => i.price);
+                const counts = items.map(i => i.count);
 
                 renderComparisonChart('chart-comparison', labels, avgPrices, counts);
                 renderComparisonDetails(labels, avgPrices, counts, 'Ders');
