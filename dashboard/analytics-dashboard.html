@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Özel Ders Piyasası Analiz Merkezi</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -379,16 +380,8 @@
 
             <div class="charts-grid">
                 <div class="chart-container">
-                    <h3>📚 Ders Dağılımı</h3>
-                    <div class="chart-wrapper"><canvas id="chart-subjects"></canvas></div>
-                </div>
-                <div class="chart-container">
                     <h3>💰 Ders Bazlı Ortalama Fiyatlar</h3>
                     <div class="chart-wrapper"><canvas id="chart-subject-prices"></canvas></div>
-                </div>
-                <div class="chart-container">
-                    <h3>🏙️ Şehir Dağılımı</h3>
-                    <div class="chart-wrapper"><canvas id="chart-cities"></canvas></div>
                 </div>
                 <div class="chart-container">
                     <h3>💵 Şehir Bazlı Ortalama Fiyatlar</h3>
@@ -730,14 +723,8 @@
                 <div class="stat-card"><div class="label">Online Ders</div><div class="value">${onlineCount}</div></div>
             `;
 
-            // Subject distribution - sorted by count ascending
-            const subjectCounts = groupBy(data, 'category_raw');
-            const subjectCountsSorted = Object.entries(subjectCounts)
-                .map(([k, v]) => ({ label: capitalize(k), value: v.length }))
-                .sort((a, b) => a.value - b.value);
-            renderVerticalBarChart('chart-subjects', subjectCountsSorted.map(i => i.label), subjectCountsSorted.map(i => i.value));
-
             // Subject prices - sorted by price ascending
+            const subjectCounts = groupBy(data, 'category_raw');
             const subjectPriceItems = [];
             Object.keys(subjectCounts).forEach(s => {
                 const prices = subjectCounts[s].filter(d => d.price_per_hour).map(d => d.price_per_hour);
@@ -751,14 +738,8 @@
             subjectPriceItems.sort((a, b) => a.value - b.value);
             renderVerticalBarChart('chart-subject-prices', subjectPriceItems.map(i => i.label), subjectPriceItems.map(i => i.value), '₺');
 
-            // City distribution - sorted by count ascending
-            const cityCounts = groupBy(data, 'city');
-            const cityCountsSorted = Object.entries(cityCounts)
-                .map(([k, v]) => ({ label: k, value: v.length }))
-                .sort((a, b) => a.value - b.value);
-            renderVerticalBarChart('chart-cities', cityCountsSorted.map(i => i.label), cityCountsSorted.map(i => i.value));
-
             // City prices - sorted by price ascending
+            const cityCounts = groupBy(data, 'city');
             const cityPriceItems = [];
             Object.keys(cityCounts).forEach(c => {
                 const prices = cityCounts[c].filter(d => d.price_per_hour).map(d => d.price_per_hour);
@@ -987,6 +968,7 @@
                         borderRadius: 6
                     }]
                 },
+                plugins: [ChartDataLabels],
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
@@ -996,6 +978,13 @@
                             callbacks: {
                                 afterLabel: (ctx) => `Kayıt Sayısı: ${counts[ctx.dataIndex]}`
                             }
+                        },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'top',
+                            color: '#e0e0e0',
+                            font: { weight: 'bold', size: 11 },
+                            formatter: (value) => value + '₺'
                         }
                     },
                     scales: {
@@ -1131,11 +1120,21 @@
                         borderRadius: 6
                     }]
                 },
+                plugins: [ChartDataLabels],
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     indexAxis: 'x',
-                    plugins: { legend: { display: false } },
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'top',
+                            color: '#e0e0e0',
+                            font: { weight: 'bold', size: 11 },
+                            formatter: (value) => value + suffix
+                        }
+                    },
                     scales: {
                         y: {
                             beginAtZero: true,
