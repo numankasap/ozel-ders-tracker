@@ -690,6 +690,20 @@
 
         function renderOverview() {
             const data = getFilteredPlayers();
+
+            // Veri yoksa uyarı göster
+            if (data.length === 0) {
+                document.getElementById('overview-stats').innerHTML = `
+                    <div class="stat-card" style="grid-column: span 5; text-align: center; padding: 40px;">
+                        <div class="label">Veri Bulunamadı</div>
+                        <div class="value" style="font-size: 16px; margin-top: 10px;">
+                            Henüz oyuncu verisi yok. Scraper'ı çalıştırın veya "Bağlantı" ayarlarını kontrol edin.
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
             const youthCount = data.filter(p => p.is_youth_player).length;
             const avgAge = data.length ? Math.round(data.reduce((a, p) => a + (p.age || 0), 0) / data.length) : 0;
             const turkishCount = data.filter(p => p.nationality_id === 1).length;
@@ -704,9 +718,11 @@
 
             // Pozisyon dağılımı
             const positions = groupBy(data, 'primary_position');
-            const posLabels = Object.keys(positions).filter(p => p);
+            const posLabels = Object.keys(positions).filter(p => p && p !== 'null');
             const posCounts = posLabels.map(p => positions[p].length);
-            renderVerticalBarChart('chart-positions', posLabels.map(translatePosition), posCounts);
+            if (posLabels.length > 0) {
+                renderVerticalBarChart('chart-positions', posLabels.map(translatePosition), posCounts);
+            }
 
             // Yaş dağılımı
             const ageRanges = {'16-20': 0, '21-25': 0, '26-30': 0, '31-35': 0, '36+': 0};
@@ -721,12 +737,28 @@
             });
             renderVerticalBarChart('chart-ages', Object.keys(ageRanges), Object.values(ageRanges));
 
-            // Milliyet (en çok)
-            // Placeholder - gerçek veri yüklenince güncellenecek
-            renderVerticalBarChart('chart-nationalities', ['Türk', 'Brezilyalı', 'Fransız', 'Senegalli', 'Portekizli'], [150, 25, 18, 15, 12]);
+            // Milliyet dağılımı (gerçek veriden)
+            const nationalities = groupBy(data.filter(p => p.nationality_id), 'nationality_id');
+            const natLabels = Object.keys(nationalities).slice(0, 5);
+            const natCounts = natLabels.map(n => nationalities[n].length);
+            const natNames = natLabels.map(n => n == 1 ? 'Türk' : `Milliyet ${n}`);
+            if (natLabels.length > 0) {
+                renderVerticalBarChart('chart-nationalities', natNames, natCounts);
+            }
 
-            // En golcüler (placeholder)
-            renderVerticalBarChart('chart-scorers', ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4', 'Oyuncu 5'], [15, 12, 10, 9, 8]);
+            // En golcü oyuncular (gerçek isimlerle, şimdilik yaşa göre sıralı ilk 5)
+            const topPlayers = [...data]
+                .filter(p => p.name)
+                .sort((a, b) => (b.age || 0) - (a.age || 0))
+                .slice(0, 5);
+
+            if (topPlayers.length > 0) {
+                renderVerticalBarChart('chart-scorers',
+                    topPlayers.map(p => p.name.split(' ').pop()),
+                    topPlayers.map(p => p.age || 0),
+                    ' yaş'
+                );
+            }
 
             renderPlayersTable('table-players', data);
         }
@@ -751,37 +783,56 @@
                 <div class="stat-card"><div class="label">Orta Saha</div><div class="value">${data.filter(p => p.primary_position === 'Midfielder').length}</div></div>
             `;
 
-            // Placeholder chart
-            renderVerticalBarChart('chart-youth-values',
-                data.slice(0, 10).map(p => p.name?.split(' ').pop() || 'Oyuncu'),
-                data.slice(0, 10).map(() => Math.floor(Math.random() * 5) + 1),
-                'M€'
-            );
+            // Genç oyuncular grafiği (gerçek isimlerle)
+            const youthTop = data.slice(0, 10).filter(p => p.name);
+            if (youthTop.length > 0) {
+                renderVerticalBarChart('chart-youth-values',
+                    youthTop.map(p => p.name.split(' ').pop()),
+                    youthTop.map(p => p.age || 0),
+                    ' yaş'
+                );
+            }
 
             renderYouthTable('table-youth', data);
         }
 
         function renderValues() {
+            const playersWithNames = allPlayers.filter(p => p.name);
+
             document.getElementById('values-stats').innerHTML = `
-                <div class="stat-card gold"><div class="label">Toplam Piyasa Değeri</div><div class="value">1.2B€</div></div>
-                <div class="stat-card"><div class="label">Ortalama Değer</div><div class="value">2.5M€</div></div>
-                <div class="stat-card"><div class="label">En Değerli</div><div class="value">25M€</div></div>
+                <div class="stat-card gold"><div class="label">Kayıtlı Oyuncu</div><div class="value">${playersWithNames.length}</div></div>
+                <div class="stat-card"><div class="label">Takım Sayısı</div><div class="value">${allTeams.length}</div></div>
+                <div class="stat-card"><div class="label">Piyasa değeri verisi için scraper'ı çalıştırın</div><div class="value">-</div></div>
             `;
 
-            // Placeholder charts
-            renderVerticalBarChart('chart-team-values',
-                ['Galatasaray', 'Fenerbahçe', 'Beşiktaş', 'Trabzonspor', 'Başakşehir'],
-                [180, 165, 140, 85, 65],
-                'M€'
-            );
+            // Takım bazlı oyuncu sayısı
+            const teamCounts = {};
+            allTeams.slice(0, 5).forEach(t => {
+                teamCounts[t.short_name || t.name] = allPlayers.filter(p => p.team_id === t.id).length || 1;
+            });
 
-            renderVerticalBarChart('chart-player-values',
-                ['Oyuncu 1', 'Oyuncu 2', 'Oyuncu 3', 'Oyuncu 4', 'Oyuncu 5'],
-                [25, 20, 18, 15, 12],
-                'M€'
-            );
+            if (Object.keys(teamCounts).length > 0) {
+                renderVerticalBarChart('chart-team-values',
+                    Object.keys(teamCounts),
+                    Object.values(teamCounts),
+                    ' oyuncu'
+                );
+            }
 
-            renderValuesTable('table-values', allPlayers.slice(0, 50));
+            // En yaşlı oyuncular (gerçek isimlerle)
+            const topByAge = [...playersWithNames]
+                .sort((a, b) => (b.age || 0) - (a.age || 0))
+                .slice(0, 5);
+
+            if (topByAge.length > 0) {
+                renderVerticalBarChart('chart-player-values',
+                    topByAge.map(p => p.name.split(' ').pop()),
+                    topByAge.map(p => p.age || 0),
+                    ' yaş'
+                );
+            }
+
+            renderValuesTable('table-values', playersWithNames.slice(0, 50));
         }
 
         function renderLeagueDetail(leagueId) {
@@ -789,13 +840,27 @@
             document.getElementById('league-page-title').textContent = `🏆 ${leagueNames[leagueId] || 'Lig'}`;
 
             const teams = allTeams.filter(t => t.league_id === leagueId);
+            const leaguePlayers = allPlayers.filter(p => p.name);
 
             document.getElementById('league-stats').innerHTML = `
                 <div class="stat-card highlight"><div class="label">Takım Sayısı</div><div class="value">${teams.length}</div></div>
+                <div class="stat-card"><div class="label">Toplam Oyuncu</div><div class="value">${leaguePlayers.length}</div></div>
             `;
 
-            renderVerticalBarChart('chart-league-scorers', ['A', 'B', 'C', 'D', 'E'], [15, 12, 10, 9, 8]);
-            renderVerticalBarChart('chart-league-assists', ['A', 'B', 'C', 'D', 'E'], [10, 9, 8, 7, 6]);
+            // Gerçek oyuncu isimleri
+            const topPlayers = leaguePlayers.slice(0, 5);
+            if (topPlayers.length > 0) {
+                renderVerticalBarChart('chart-league-scorers',
+                    topPlayers.map(p => p.name.split(' ').pop()),
+                    topPlayers.map(p => p.age || 0),
+                    ' yaş'
+                );
+                renderVerticalBarChart('chart-league-assists',
+                    topPlayers.map(p => p.name.split(' ').pop()),
+                    topPlayers.map(p => p.age || 0),
+                    ' yaş'
+                );
+            }
         }
 
         function renderTeamDetail(teamId) {
@@ -883,13 +948,17 @@
 
         function renderYouthTable(tableId, data) {
             const table = document.getElementById(tableId);
+            if (data.length === 0) {
+                table.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:40px;">Veri bulunamadı</td></tr>';
+                return;
+            }
             table.innerHTML = `
                 <thead>
                     <tr>
                         <th>Oyuncu</th>
                         <th>Pozisyon</th>
                         <th>Yaş</th>
-                        <th>Potansiyel</th>
+                        <th>Boy</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -898,7 +967,7 @@
                             <td>${p.name || '-'}</td>
                             <td><span class="position-badge">${translatePosition(p.primary_position)}</span></td>
                             <td>${p.age || '-'}</td>
-                            <td><span class="value">⭐ ${Math.floor(Math.random() * 20) + 70}</span></td>
+                            <td>${p.height_cm ? p.height_cm + ' cm' : '-'}</td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -907,6 +976,10 @@
 
         function renderValuesTable(tableId, data) {
             const table = document.getElementById(tableId);
+            if (data.length === 0) {
+                table.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;">Veri bulunamadı</td></tr>';
+                return;
+            }
             table.innerHTML = `
                 <thead>
                     <tr>
@@ -914,7 +987,7 @@
                         <th>Oyuncu</th>
                         <th>Pozisyon</th>
                         <th>Yaş</th>
-                        <th>Piyasa Değeri</th>
+                        <th>Boy</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -924,7 +997,7 @@
                             <td>${p.name || '-'}</td>
                             <td><span class="position-badge">${translatePosition(p.primary_position)}</span></td>
                             <td>${p.age || '-'}</td>
-                            <td class="value">${(Math.random() * 20 + 1).toFixed(1)}M€</td>
+                            <td>${p.height_cm ? p.height_cm + ' cm' : '-'}</td>
                         </tr>
                     `).join('')}
                 </tbody>

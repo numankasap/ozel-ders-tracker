@@ -492,6 +492,140 @@ class FootballDataCollector:
         logger.info(f"Collected {len(players)} player values")
         return players
 
+    def collect_from_transfermarkt_only(self, team_slug: str, team_tm_id: str, team_name: str, league_id: int = 1):
+        """Sadece Transfermarkt'tan oyuncu verisi topla ve Supabase'e kaydet"""
+        logger.info(f"Collecting players from Transfermarkt: {team_name}...")
+
+        players = self.transfermarkt.get_team_players(team_slug, team_tm_id)
+        saved_count = 0
+
+        # Önce takımı kaydet
+        team_record = {
+            'name': team_name,
+            'short_name': team_name[:20] if len(team_name) > 20 else team_name,
+            'transfermarkt_id': team_tm_id,
+            'league_id': league_id,
+            'updated_at': datetime.now().isoformat()
+        }
+        self.supabase.upsert('teams', team_record)
+
+        # Takım ID'sini al
+        teams = self.supabase.select('teams', {'transfermarkt_id': f'eq.{team_tm_id}'})
+        team_db_id = teams[0]['id'] if teams else None
+
+        for player in players:
+            try:
+                # Pozisyonu İngilizce'ye çevir
+                position = self._translate_position(player.get('position', ''))
+
+                # Genç oyuncu mu?
+                age = player.get('age')
+                is_youth = age and age < 23
+
+                player_record = {
+                    'name': player.get('name'),
+                    'transfermarkt_id': player.get('transfermarkt_id'),
+                    'age': age,
+                    'primary_position': position,
+                    'is_youth_player': is_youth,
+                    'nationality_id': 1,  # Türkiye (varsayılan)
+                    'updated_at': datetime.now().isoformat()
+                }
+
+                # Oyuncuyu kaydet
+                if self.supabase.upsert('players', player_record):
+                    saved_count += 1
+                    self.stats['players_fetched'] += 1
+
+                    # Piyasa değerini kaydet
+                    if player.get('market_value'):
+                        # Oyuncu ID'sini al
+                        players_db = self.supabase.select('players', {'transfermarkt_id': f"eq.{player.get('transfermarkt_id')}"})
+                        if players_db:
+                            player_db_id = players_db[0]['id']
+                            value_record = {
+                                'player_id': player_db_id,
+                                'recorded_at': datetime.now().strftime('%Y-%m-%d'),
+                                'market_value': player['market_value'],
+                                'source': 'transfermarkt'
+                            }
+                            self.supabase.upsert('player_market_values', value_record)
+                            self.stats['values_updated'] += 1
+
+                            # player_teams ilişkisi
+                            if team_db_id:
+                                team_relation = {
+                                    'player_id': player_db_id,
+                                    'team_id': team_db_id,
+                                    'season_id': 1,  # 2024-2025
+                                    'is_current': True
+                                }
+                                self.supabase.upsert('player_teams', team_relation)
+
+            except Exception as e:
+                logger.error(f"Error saving player {player.get('name')}: {e}")
+                self.stats['errors'] += 1
+
+        logger.info(f"Saved {saved_count} players from {team_name}")
+        return saved_count
+
+    def _translate_position(self, position_tr: str) -> str:
+        """Türkçe pozisyonu İngilizce'ye çevir"""
+        if not position_tr:
+            return 'Unknown'
+
+        position_tr = position_tr.lower()
+
+        # Kaleci
+        if 'kaleci' in position_tr or 'gk' in position_tr:
+            return 'Goalkeeper'
+
+        # Defans
+        if 'defans' in position_tr or 'stoper' in position_tr or 'bek' in position_tr:
+            return 'Defender'
+
+        # Orta saha
+        if 'orta saha' in position_tr or 'ortasaha' in position_tr or 'merkez' in position_tr:
+            return 'Midfielder'
+
+        # Forvet / Santrafor
+        if 'forvet' in position_tr or 'santrafor' in position_tr or 'kanat' in position_tr or 'hücum' in position_tr:
+            return 'Attacker'
+
+        return 'Unknown'
+
+    def run_transfermarkt_collection(self, teams: dict = None):
+        """Sadece Transfermarkt'tan veri toplama (API olmadan)"""
+        if teams is None:
+            teams = SUPER_LIG_TEAMS_TM
+
+        logger.info("=" * 60)
+        logger.info("TRANSFERMARKT VERİ TOPLAMA BAŞLADI (API-FREE)")
+        logger.info("=" * 60)
+
+        start_time = time.time()
+
+        for team_slug, team_id in teams.items():
+            team_name = team_slug.replace('-', ' ').title().replace('Istanbul', 'İstanbul')
+            team_name = team_name.replace('Fk', 'FK').replace('Sk', 'SK')
+
+            try:
+                self.collect_from_transfermarkt_only(team_slug, team_id, team_name)
+                time.sleep(TRANSFERMARKT_DELAY)
+            except Exception as e:
+                logger.error(f"Error collecting {team_name}: {e}")
+                self.stats['errors'] += 1
+
+        elapsed = time.time() - start_time
+
+        logger.info("\n" + "=" * 60)
+        logger.info("VERİ TOPLAMA TAMAMLANDI")
+        logger.info(f"Süre: {elapsed/60:.1f} dakika")
+        logger.info(f"Oyuncu: {self.stats['players_fetched']}")
+        logger.info(f"Piyasa Değeri: {self.stats['values_updated']}")
+        logger.info(f"Hata: {self.stats['errors']}")
+        logger.info("=" * 60)
+
     def collect_youth_players(self, min_age: int = 16, max_age: int = 21):
         """Genç yetenekleri topla (tüm liglerden)"""
         logger.info(f"Collecting youth players (age {min_age}-{max_age})...")
@@ -606,21 +740,15 @@ SUPER_LIG_TEAMS_TM = {
 
 
 def main():
-    """Ana fonksiyon"""
-    # API key kontrolü
-    if not API_FOOTBALL_KEY:
-        logger.error("API_FOOTBALL_KEY environment variable not set!")
-        logger.info("Get your free API key from: https://rapidapi.com/api-sports/api/api-football")
-        return
-
+    """Ana fonksiyon - Sadece Transfermarkt (API gerektirmez)"""
     if not SUPABASE_URL or not SUPABASE_KEY:
         logger.error("SUPABASE_URL and SUPABASE_KEY environment variables required!")
         return
 
     collector = FootballDataCollector()
 
-    # Sadece Süper Lig ve 1. Lig (free tier limitleri için)
-    collector.run_full_collection(leagues=[203, 204])
+    # Sadece Transfermarkt'tan veri topla (API-Football gerektirmez)
+    collector.run_transfermarkt_collection()
 
 
 if __name__ == '__main__':

@@ -7,23 +7,14 @@ on:
 
   # Manuel tetikleme
   workflow_dispatch:
-    inputs:
-      leagues:
-        description: 'Lig ID listesi (virgülle ayrılmış, boş = tümü)'
-        required: false
-        default: '203,204'
-      collect_youth:
-        description: 'Genç yetenekleri topla'
-        required: false
-        default: 'true'
 
 env:
   PYTHON_VERSION: '3.11'
 
 jobs:
-  collect-football-data:
+  collect-from-transfermarkt:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # 2 saat maksimum
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -40,75 +31,17 @@ jobs:
           cd football-tracker/scraper
           pip install -r requirements.txt
 
-      - name: Run football data collector
+      - name: Collect player data from Transfermarkt
         env:
-          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           cd football-tracker/scraper
           python scraper.py
-        continue-on-error: true
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scraper-logs-${{ github.run_number }}
-          path: football-tracker/scraper/*.log
-          retention-days: 7
-
-  collect-market-values:
-    runs-on: ubuntu-latest
-    needs: collect-football-data
-    timeout-minutes: 60
-    if: success() || failure()  # Her durumda çalış
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          cd football-tracker/scraper
-          pip install -r requirements.txt
-
-      - name: Collect market values from Transfermarkt
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: |
-          cd football-tracker/scraper
-          python -c "
-          from scraper import TransfermarktScraper, SupabaseClient, SUPER_LIG_TEAMS_TM
-          import os
-          import logging
-
-          logging.basicConfig(level=logging.INFO)
-          logger = logging.getLogger(__name__)
-
-          supabase = SupabaseClient(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
-          tm = TransfermarktScraper()
-
-          # İlk 5 takım (rate limit için)
-          teams = list(SUPER_LIG_TEAMS_TM.items())[:5]
-
-          for slug, tm_id in teams:
-              logger.info(f'Collecting: {slug}')
-              players = tm.get_team_players(slug, tm_id)
-              logger.info(f'Found {len(players)} players')
-          "
-        continue-on-error: true
 
   notify-completion:
     runs-on: ubuntu-latest
-    needs: [collect-football-data, collect-market-values]
+    needs: collect-from-transfermarkt
     if: always()
 
     steps:
@@ -117,5 +50,6 @@ jobs:
           echo "## Football Data Collection Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Run Date**: $(date -u +'%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
-          echo "- **Data Collection**: ${{ needs.collect-football-data.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Market Values**: ${{ needs.collect-market-values.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Transfermarkt Collection**: ${{ needs.collect-from-transfermarkt.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Süper Lig takımlarından oyuncu verileri toplandı." >> $GITHUB_STEP_SUMMARY
