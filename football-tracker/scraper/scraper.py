@@ -213,20 +213,27 @@ class TransfermarktScraper:
             return None
 
     def get_team_players(self, team_slug: str, team_id: str) -> List[Dict]:
-        """Takım oyuncularını ve piyasa değerlerini al"""
-        url = f"{self.base_url}/{team_slug}/startseite/verein/{team_id}"
+        """Takım oyuncularını ve piyasa değerlerini al - detaylı kadro sayfasından"""
+        # Detaylı kadro sayfası daha fazla bilgi içerir
+        url = f"{self.base_url}/{team_slug}/kader/verein/{team_id}/saison_id/2024/plus/1"
         soup = self._get_soup(url)
 
         if not soup:
-            return []
+            # Fallback: ana sayfa
+            url = f"{self.base_url}/{team_slug}/startseite/verein/{team_id}"
+            soup = self._get_soup(url)
+            if not soup:
+                return []
 
         players = []
         table = soup.select_one('table.items')
         if not table:
+            logger.warning(f"No table found for {team_slug}")
             return []
 
         for row in table.select('tbody tr.odd, tbody tr.even'):
             try:
+                # Oyuncu adı ve linki
                 player_link = row.select_one('td.hauptlink a')
                 if not player_link:
                     continue
@@ -238,34 +245,69 @@ class TransfermarktScraper:
                 tm_id_match = re.search(r'/spieler/(\d+)', href)
                 tm_id = tm_id_match.group(1) if tm_id_match else None
 
-                # Piyasa değeri
+                # Piyasa değeri - sağdaki ana hücre
                 value_cell = row.select_one('td.rechts.hauptlink')
                 market_value = self._parse_market_value(value_cell.text if value_cell else '')
 
-                # Yaş
-                age_cell = row.select_one('td.zentriert')
+                # Tüm zentriert hücrelerini al
+                centered_cells = row.select('td.zentriert')
+
+                # Doğum tarihi ve yaş - genelde ilk veya ikinci hücrede
                 age = None
-                if age_cell:
-                    age_text = age_cell.text.strip()
-                    age_match = re.search(r'\((\d+)\)', age_text)
+                birth_date = None
+                for cell in centered_cells:
+                    cell_text = cell.text.strip()
+                    # Doğum tarihi formatı: "01.01.2000 (24)"
+                    age_match = re.search(r'\((\d{1,2})\)', cell_text)
                     if age_match:
                         age = int(age_match.group(1))
+                        # Doğum tarihi
+                        date_match = re.search(r'(\d{2}\.\d{2}\.\d{4})', cell_text)
+                        if date_match:
+                            birth_date = date_match.group(1)
+                        break
+                    # Sadece yaş varsa (bazı sayfalarda)
+                    if cell_text.isdigit() and 15 <= int(cell_text) <= 45:
+                        age = int(cell_text)
+                        break
 
-                # Pozisyon
-                position_cell = row.select('td.zentriert')
-                position = position_cell[1].text.strip() if len(position_cell) > 1 else None
+                # Pozisyon - inline-table içinde
+                position = None
+                pos_cell = row.select_one('td table.inline-table tr:last-child td')
+                if pos_cell:
+                    position = pos_cell.text.strip()
+
+                # Alternatif pozisyon yeri
+                if not position:
+                    for cell in centered_cells:
+                        cell_text = cell.text.strip()
+                        if any(pos in cell_text.lower() for pos in ['kaleci', 'defans', 'orta', 'forvet', 'kanat', 'stoper', 'bek', 'santra']):
+                            position = cell_text
+                            break
+
+                # Uyruk (nationality) - bayrak resmi varsa
+                nationality = None
+                flag_img = row.select_one('img.flaggenrahmen')
+                if flag_img:
+                    nationality = flag_img.get('title', '')
 
                 players.append({
                     'name': name,
                     'transfermarkt_id': tm_id,
                     'market_value': market_value,
                     'age': age,
-                    'position': position
+                    'birth_date': birth_date,
+                    'position': position,
+                    'nationality': nationality
                 })
+
+                logger.debug(f"Parsed: {name}, Age: {age}, Position: {position}, Value: {market_value}")
+
             except Exception as e:
                 logger.debug(f"Row parse error: {e}")
                 continue
 
+        logger.info(f"Parsed {len(players)} players from {team_slug}")
         return players
 
     def get_player_market_value_history(self, player_slug: str, player_id: str) -> List[Dict]:
@@ -499,6 +541,10 @@ class FootballDataCollector:
         players = self.transfermarkt.get_team_players(team_slug, team_tm_id)
         saved_count = 0
 
+        if not players:
+            logger.warning(f"No players found for {team_name}")
+            return 0
+
         # Önce takımı kaydet
         team_record = {
             'name': team_name,
@@ -518,31 +564,45 @@ class FootballDataCollector:
                 # Pozisyonu İngilizce'ye çevir
                 position = self._translate_position(player.get('position', ''))
 
-                # Genç oyuncu mu?
+                # Genç oyuncu mu? (23 yaş altı)
                 age = player.get('age')
-                is_youth = age and age < 23
+                is_youth = bool(age and age < 23)
+
+                # Doğum tarihini parse et (DD.MM.YYYY -> YYYY-MM-DD)
+                birth_date = None
+                if player.get('birth_date'):
+                    try:
+                        parts = player['birth_date'].split('.')
+                        if len(parts) == 3:
+                            birth_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                    except:
+                        pass
 
                 player_record = {
                     'name': player.get('name'),
                     'transfermarkt_id': player.get('transfermarkt_id'),
                     'age': age,
+                    'birth_date': birth_date,
                     'primary_position': position,
                     'is_youth_player': is_youth,
                     'nationality_id': 1,  # Türkiye (varsayılan)
                     'updated_at': datetime.now().isoformat()
                 }
 
+                logger.info(f"Saving: {player.get('name')}, Age: {age}, Position: {position}, Youth: {is_youth}")
+
                 # Oyuncuyu kaydet
                 if self.supabase.upsert('players', player_record):
                     saved_count += 1
                     self.stats['players_fetched'] += 1
 
-                    # Piyasa değerini kaydet
-                    if player.get('market_value'):
-                        # Oyuncu ID'sini al
-                        players_db = self.supabase.select('players', {'transfermarkt_id': f"eq.{player.get('transfermarkt_id')}"})
-                        if players_db:
-                            player_db_id = players_db[0]['id']
+                    # Oyuncu ID'sini al
+                    players_db = self.supabase.select('players', {'transfermarkt_id': f"eq.{player.get('transfermarkt_id')}"})
+                    if players_db:
+                        player_db_id = players_db[0]['id']
+
+                        # Piyasa değerini kaydet
+                        if player.get('market_value'):
                             value_record = {
                                 'player_id': player_db_id,
                                 'recorded_at': datetime.now().strftime('%Y-%m-%d'),
@@ -552,15 +612,15 @@ class FootballDataCollector:
                             self.supabase.upsert('player_market_values', value_record)
                             self.stats['values_updated'] += 1
 
-                            # player_teams ilişkisi
-                            if team_db_id:
-                                team_relation = {
-                                    'player_id': player_db_id,
-                                    'team_id': team_db_id,
-                                    'season_id': 1,  # 2024-2025
-                                    'is_current': True
-                                }
-                                self.supabase.upsert('player_teams', team_relation)
+                        # player_teams ilişkisi
+                        if team_db_id:
+                            team_relation = {
+                                'player_id': player_db_id,
+                                'team_id': team_db_id,
+                                'season_id': 1,  # 2024-2025
+                                'is_current': True
+                            }
+                            self.supabase.upsert('player_teams', team_relation)
 
             except Exception as e:
                 logger.error(f"Error saving player {player.get('name')}: {e}")
@@ -574,24 +634,45 @@ class FootballDataCollector:
         if not position_tr:
             return 'Unknown'
 
-        position_tr = position_tr.lower()
+        position_tr = position_tr.lower().strip()
 
         # Kaleci
-        if 'kaleci' in position_tr or 'gk' in position_tr:
+        if any(x in position_tr for x in ['kaleci', 'goalkeeper', 'torwart', 'tw']):
             return 'Goalkeeper'
 
-        # Defans
-        if 'defans' in position_tr or 'stoper' in position_tr or 'bek' in position_tr:
+        # Defans - çeşitli pozisyonlar
+        if any(x in position_tr for x in [
+            'stoper', 'defans', 'bek', 'savunma',
+            'sol bek', 'sağ bek', 'libero',
+            'innenverteidiger', 'verteidiger',
+            'linker verteidiger', 'rechter verteidiger',
+            'iv', 'lv', 'rv', 'lb', 'rb'
+        ]):
             return 'Defender'
 
-        # Orta saha
-        if 'orta saha' in position_tr or 'ortasaha' in position_tr or 'merkez' in position_tr:
+        # Orta saha - çeşitli pozisyonlar
+        if any(x in position_tr for x in [
+            'orta saha', 'ortasaha', 'merkez', 'oyun kurucu',
+            'defansif orta', 'ofansif orta', 'box-to-box',
+            'mittelfeld', 'zentrales mittelfeld',
+            'defensives mittelfeld', 'offensives mittelfeld',
+            'dm', 'om', 'zm', 'cm', 'lm', 'rm',
+            'sol orta', 'sağ orta', 'on numara'
+        ]):
             return 'Midfielder'
 
-        # Forvet / Santrafor
-        if 'forvet' in position_tr or 'santrafor' in position_tr or 'kanat' in position_tr or 'hücum' in position_tr:
+        # Forvet / Santrafor - çeşitli pozisyonlar
+        if any(x in position_tr for x in [
+            'forvet', 'santrafor', 'kanat', 'hücum', 'golcü',
+            'sol kanat', 'sağ kanat', 'ikinci forvet',
+            'stürmer', 'mittelstürmer', 'linksaußen', 'rechtsaußen',
+            'hängende spitze', 'flügel',
+            'st', 'cf', 'lw', 'rw', 'ss', 'rf', 'lf'
+        ]):
             return 'Attacker'
 
+        # Bilinmeyen ama debug için logla
+        logger.debug(f"Unknown position: {position_tr}")
         return 'Unknown'
 
     def run_transfermarkt_collection(self, teams: dict = None):
