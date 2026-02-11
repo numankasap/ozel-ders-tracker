@@ -1,0 +1,106 @@
+name: Polymarket Autonomous Trader
+
+on:
+  schedule:
+    # Her 15 dakikada bir calistir
+    # GitHub Actions bazen 1-5 dakika gecikebilir
+    - cron: '*/15 * * * *'
+
+  # Manuel tetikleme (debug / acil durum icin)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (gercek islem yapma)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      log_level:
+        description: 'Log seviyesi'
+        required: false
+        default: 'INFO'
+        type: choice
+        options:
+          - 'DEBUG'
+          - 'INFO'
+          - 'WARNING'
+
+# Ayni anda birden fazla calismayi engelle
+concurrency:
+  group: polymarket-trader
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    name: Trading Cycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # Maks 10 dakika calisabilir
+
+    steps:
+      # 1. Kodu cek
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Python kur
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'polymarket-bot/requirements.txt'
+
+      # 3. Bagimlilik yukle (onbellekten hizli yuklenir)
+      - name: Install Dependencies
+        working-directory: polymarket-bot
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. Botu calistir
+      - name: Run Trading Bot
+        working-directory: polymarket-bot
+        env:
+          # Polymarket (Cüzdan)
+          POLY_PRIVATE_KEY: ${{ secrets.POLY_PRIVATE_KEY }}
+
+          # Supabase (Hafiza)
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+          # OpenAI (Zeka)
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+          # Haber API'lari (Opsiyonel)
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
+
+          # LLM Model (Opsiyonel - varsayilan: gpt-4o)
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+
+          # Python ortam degiskenleri
+          PYTHONUNBUFFERED: '1'
+          PYTHONDONTWRITEBYTECODE: '1'
+
+        run: |
+          DRY_RUN_FLAG=""
+          LOG_LEVEL="INFO"
+
+          # Manuel tetiklemede parametreleri al
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              DRY_RUN_FLAG="--dry-run"
+            fi
+            LOG_LEVEL="${{ inputs.log_level }}"
+          fi
+
+          python main.py $DRY_RUN_FLAG --log-level $LOG_LEVEL
+
+      # 5. Hata durumunda bildirim (opsiyonel)
+      - name: Report Failure
+        if: failure()
+        run: |
+          echo "::error::Trading bot dongusu basarisiz oldu!"
+          echo "Zaman: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Tetikleyen: ${{ github.event_name }}"
